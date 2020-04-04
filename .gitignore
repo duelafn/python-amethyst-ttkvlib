@@ -1,0 +1,19 @@
+# Python Ignores
+*.egg
+*.egg-info
+*.py[cod]
+.coverage
+.installed.cfg
+.tox
+/MANIFEST
+/debbuild
+/pydoc
+__pycache__
+build
+develop-eggs
+dist
+eggs
+nosetests.xml
+parts
+pip-log.txt
+sdist
