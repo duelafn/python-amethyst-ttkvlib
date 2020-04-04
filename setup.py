@@ -33,7 +33,10 @@ setuptools.setup(
     author_email = 'dean@serenevy.net',
     description  = 'Tabletop Games GUI Support',
     packages     = setuptools.find_packages(),
-    requires     = [ 'amethyst.core (>=0.8.6)', ],
+    requires     = [
+        'amethyst.core (>=0.8.6)',
+        'kivy (>=1.10)',
+    ],
     python_requires = '>=3.6',
     namespace_packages = [ 'amethyst' ],
     test_suite   = 'setup.my_test_suite',
