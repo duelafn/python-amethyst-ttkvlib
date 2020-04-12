@@ -291,7 +291,7 @@ class CardFan(Factory.FloatLayout):
                     anims.append(Animation(opacity = 1, duration = dt))
 
                 rot = rotation_for_animation(widget.rotation, target[2])
-                if not math.isclose(0, rot):
+                if not math.isclose(0, abs(widget.rotation - rot)):
                     dt = min(2, abs(widget.rotation - rot) / self.angular_speed)
                     anims.append(Animation(rotation = rot, duration = dt))
 
