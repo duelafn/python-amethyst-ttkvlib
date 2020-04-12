@@ -23,28 +23,25 @@ from amethyst.core import Object, Attr
 
 from amethyst.games.filters import IFilterable
 
+def rotation_for_animation(a, b):
+    # Note: 0..360 even if a,b negative
+    a, b = a%360, b%360
+    if b - a < -180:
+        return b + 360
+    if b - a > 180:
+        return b - 360
+    return b
+
 
 Builder.load_string('''
 
 <CardImage>:
-    scale: min((self.width/img.width if img.width else 1), (self.height/img.height if img.height else 1)) or 1
     do_rotation: False
     do_scale: False
     do_translation: False
-#     canvas.before:
-#         Color:
-#             rgba: (1,0,0,0.3)
-#         Rectangle:
-#             pos: self.pos
-#             size: self.size
-#         PushMatrix
-#         Rotate:
-#             angle: self.angle or 0
-#             origin: self.center
-#     canvas.after:
-#         PopMatrix
     Image:
         id: img
+        size: root.size
         source: (root.source if root.show_front else root.back_source) or ''
 
 <CardFan>:
@@ -275,14 +272,14 @@ class CardFan(Factory.FloatLayout):
             keep.add(id(widget))
             self.add_widget(widget)
 
-            print(i, self.pos, widget.center, widget.rotation, '->', target)
-
+            widget.size_hint = (None, None)
+            widget.pos_hint = {}
+            widget.size = self.card_size
 
             anims = []
             dt = 0
             if state.status == 'new':
                 widget.opacity = 0
-                widget.size = self.card_size
                 widget.center_x = target[0]
                 widget.center_y = target[1]
                 widget.rotation = target[2]
@@ -294,10 +291,10 @@ class CardFan(Factory.FloatLayout):
                     dt = min(2, self.max_angle / self.angular_speed / 3)
                     anims.append(Animation(opacity = 1, duration = dt))
 
-                if widget.rotation != target[2]:
-                    widget.rotation = target[2]
-#                     dt = min(2, abs(widget.rotation - target[2]) / self.angular_speed)
-#                     anims.append(Animation(rotation = target[2], duration = dt))
+                rot = rotation_for_animation(widget.rotation, target[2])
+                if not math.isclose(0, rot):
+                    dt = min(2, abs(widget.rotation - rot) / self.angular_speed)
+                    anims.append(Animation(rotation = rot, duration = dt))
 
                 dx = abs(widget.center_x - target[0] - self.x)
                 dy = abs(widget.center_y - target[1] - self.y)

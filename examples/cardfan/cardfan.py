@@ -8,6 +8,7 @@ warnings.filterwarnings('ignore', module=r'.*/(?:pint|kivy)/.*')
 warnings.filterwarnings('ignore', module=r'(?:babel|pandas|_pytest)\..*')
 ##
 from kivy.config import Config
+# Config.set('graphics', 'fullscreen', 'auto')
 Config.set('kivy', 'exit_on_escape', 1)
 from kivy.app import App
 from kivy.factory import Factory
@@ -100,7 +101,7 @@ Builder.load_string("""
                 Label:
             Label:
 
-        FloatLayout:
+        RelativeLayout:
             size_hint_x: 0.7
             BoxLayout:
                 orientation: "vertical"
@@ -124,7 +125,6 @@ Builder.load_string("""
                     show_front: False
             CardFan:
                 id: fan
-                pos: self.parent.pos
                 size_hint: (1, 0.6)
                 card_widget: 'CardImage'
                 card_size: draw_pile.size
@@ -133,6 +133,7 @@ Builder.load_string("""
                 max_angle: int(max_angle.text or 60)
                 spacing: int(spacing.text or 48)
                 lift: int(lift.text or 48)
+
 """
 )
 
@@ -154,13 +155,14 @@ class CardFanApp(App):
         return self.main
 
     def add(self, num, widget=None):
-        print(self.draw_pile.size)
-
         card = Card(name=num)
         n = 0
         # Keep them sorted when drawing
         for n, c in enumerate(self.fan.cards):
-            if c['card'].name > num: break
+            if c['card'].name > num:
+                break
+        else:
+            n = len(self.fan.cards)
         self.fan.insert(n, dict(card=card), widget=widget)
 
     def draw(self):
