@@ -34,7 +34,6 @@ def rotation_for_animation(a, b):
 
 
 Builder.load_string('''
-
 <CardImage>:
     do_rotation: False
     do_scale: False

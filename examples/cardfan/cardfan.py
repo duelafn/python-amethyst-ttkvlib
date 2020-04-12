@@ -173,10 +173,12 @@ class CardFanApp(App):
 
     def discard(self):
         pass
+
     def shuffle(self):
-        pass
+        random.shuffle(self.fan.cards)
+
     def sort(self):
-        pass
+        self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
 
 CardFanApp().run()
