@@ -46,7 +46,7 @@ Builder.load_string("""
                 on_press: app.add(2)
             Button:
                 text: "Remove a '2'"
-                on_press: app.discard(2)
+                on_press: app.trash(2)
 
             Button:
                 text: "Draw"
@@ -177,29 +177,31 @@ class CardFanApp(App):
         img.copy_from(self.draw_pile)
         self.add(random.randrange(1, 6), widget=img)
 
-    def discard(self, which=None):
+    def discard(self):
+        # Send a card to the discard pile
         if 0 == len(self.fan):
             return
-        if which is None:
-            data, widget = self.fan.pop(random.randrange(0, len(self.fan)), recycle=False)
-            widget.opacity = 1
-            self.fan.parent.add_widget(widget)
-            dt = math.hypot(widget.x-self.discard_pile.x, widget.y-self.discard_pile.y) / self.fan.linear_speed
-            anim = Factory.Animation(
-                x=self.discard_pile.x,
-                y=self.discard_pile.y,
-                width=self.discard_pile.width,
-                height=self.discard_pile.height,
-                rotation=rotation_for_animation(widget.rotation, 0),
-                duration=min(2,dt),
-            )
-            anim.bind(on_complete=lambda *args: self.fan.recycle(widget))
-            anim.start(widget)
-        else:
-            for n, c in enumerate(self.fan.cards):
-                if c['card'].name == which:
-                    self.fan.pop(n)
-                    break
+        data, widget = self.fan.pop(random.randrange(0, len(self.fan)), recycle=False)
+        widget.opacity = 1
+        self.fan.parent.add_widget(widget)
+        dt = math.hypot(widget.x-self.discard_pile.x, widget.y-self.discard_pile.y) / self.fan.linear_speed
+        anim = Factory.Animation(
+            x=self.discard_pile.x,
+            y=self.discard_pile.y,
+            width=self.discard_pile.width,
+            height=self.discard_pile.height,
+            rotation=rotation_for_animation(widget.rotation, 0),
+            duration=min(2,dt),
+        )
+        anim.bind(on_complete=lambda *args: self.fan.recycle(widget))
+        anim.start(widget)
+
+    def trash(self, which):
+        # Poof, into a puff of smoke
+        for n, c in enumerate(self.fan.cards):
+            if c['card'].name == which:
+                self.fan.pop(n)
+                return
 
     def shuffle(self):
         random.shuffle(self.fan.cards)
