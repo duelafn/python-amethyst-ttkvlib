@@ -164,7 +164,7 @@ class CardFan(Factory.FloatLayout):
     the fan never exceeds the widget width.
     """
     cards = Factory.ListProperty()
-    card_widget = Factory.ObjectProperty()
+    card_widget = Factory.ObjectProperty('CardImage')
     card_width = Factory.NumericProperty(120)
     card_height = Factory.NumericProperty(180)
     card_size = Factory.ReferenceListProperty(card_width, card_height)

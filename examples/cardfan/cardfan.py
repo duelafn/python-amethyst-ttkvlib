@@ -22,7 +22,10 @@ from amethyst.games.util import random, nonce
 from amethyst.ttkvlib.util import rotation_for_animation
 from amethyst.core import Object, Attr
 
+# A kv specification of the layout of our app. Some comments in there for
+# those less familiar with kivy
 Builder.load_string("""
+# Define custom widgets from base widgets with some default parameter values.
 <VLabel@Label>:
     size_hint_y: None
     height: self.texture_size[1]
@@ -30,10 +33,16 @@ Builder.load_string("""
     size_hint_y: None
     height: self.minimum_height
 
+# Make a clickable version of our CardImage for the draw and discard piles.
+<ClickCardImage@ButtonBehavior+CardImage>:
+
 <MainScreen@FloatLayout>:
     BoxLayout:
         orientation: "vertical"
 
+        # We start with a row of buttons across the top which, on press,
+        # each call a method of our app. "app", "self", and "root" are
+        # special variables
         BoxLayout:
             orientation: "horizontal"
             size_hint_y: None
@@ -66,13 +75,14 @@ Builder.load_string("""
             orientation: "horizontal"
             padding: (0, 32, 0, 16)
 
+            # Vertically, we have a set of text inputs which (later) we
+            # will feed directly (without validation) into the fan parameters.
             BoxLayout:
                 orientation: "vertical"
                 size_hint_x: 0.3
                 spacing: 32
                 BoxLayout:
                     orientation: "horizontal"
-                    height: self.minimum_height
                     VLabel:
                         text: "Min radius"
                     VTextInput:
@@ -109,32 +119,46 @@ Builder.load_string("""
 
             RelativeLayout:
                 size_hint_x: 0.7
+                # Simple draw and discard piles. In addition to creating
+                # visible on-screen targets. They also give us location
+                # information for when we draw and discard in the app.
                 BoxLayout:
                     orientation: "vertical"
                     pos_hint: {'x': 0.2, 'top': 1}
                     size_hint: (0.2, 0.4)
                     VLabel:
                         text: "Draw"
-                    CardImage:
+                    ClickCardImage:
                         id: draw_pile
                         back_source: 'card-back.png'
                         show_front: False
+                        on_press: app.draw()
+
                 BoxLayout:
                     orientation: "vertical"
                     pos_hint: {'x': 0.6, 'top': 1}
                     size_hint: (0.2, 0.4)
                     VLabel:
                         text: "Discard"
-                    CardImage:
+                    ClickCardImage:
                         id: discard_pile
                         back_source: 'card-back.png'
                         show_front: False
+                        on_press: app.discard()
+
+                # Finally the CardFan itself. We set some desired
+                # properties, make sure the card is face-up when it gets
+                # moved into the fan, and set some parameters from the text
+                # input boxes above.
                 CardFan:
                     id: fan
                     size_hint: (1, 0.6)
                     card_widget: 'CardImage'
-                    card_size: (draw_pile.width + 75, draw_pile.height + 75)
+                    card_width:  draw_pile.width + 75
+                    card_height: draw_pile.height + 75
+
                     on_added: args[2].show_front = True
+
                     min_radius: int(min_radius.text or -1)
                     max_angle: int(max_angle.text or 60)
                     spacing: int(spacing.text or 48)
@@ -143,6 +167,9 @@ Builder.load_string("""
 """
 )
 
+# Card is an immutable object for us. If we tried modifying it, the kivy
+# widgets would not automatically pick up the changes since we are using
+# standard attributes and properties (not kivy `Property()` objects).
 class Card(Object):
     id = Attr(default=nonce)
     name = Attr()
@@ -151,6 +178,7 @@ class Card(Object):
     @property
     def source(self):
         return f"card-{self.name}.png"
+
 
 class CardFanApp(App):
     def build(self):
