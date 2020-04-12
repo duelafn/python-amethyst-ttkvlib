@@ -161,6 +161,9 @@ class CardFanApp(App):
         return self.main
 
     def add(self, num, widget=None):
+        # We can just `insert()` dictionaries into the fan. This can be
+        # done using insert or directly manipulating fan.cards. These cards
+        # will just appear in the fan using a fade-in.
         card = Card(name=num)
         n = 0
         # Keep them sorted when drawing
@@ -172,18 +175,37 @@ class CardFanApp(App):
         self.fan.insert(n, dict(card=card), widget=widget)
 
     def draw(self):
-        # Drawing: copy a card from the draw pile, then move it to the fan
+        # If we instead want an animated draw or deal of a card, we have to
+        # get ahold of a valid widget, configure it with its starting
+        # position, then insert it into the fan. A `copy_from()` method on
+        # the draw pile which just clones all interesting attributes makes
+        # this straight forward since the fan will handle animation for us.
         img = self.fan.get_card_widget()
         img.copy_from(self.draw_pile)
         self.add(random.randrange(1, 6), widget=img)
 
+    def trash(self, which):
+        # Poof, into a puff of smoke. Popping a card from the fan will
+        # remove the data from `cards` and, after a fade-out animation,
+        # recycle the widget for later use.
+        for n, c in enumerate(self.fan.cards):
+            if c['card'].name == which:
+                self.fan.pop(n) # returns the dict() we inserted above, but we don't need it
+                return
+
     def discard(self):
-        # Send a card to the discard pile
+        # When discarding we have more work to do ourselves. If we pop with
+        # `recycle=False`, the fan will return our original data dictionary
+        # and also the widget for the card.
         if 0 == len(self.fan):
             return
         data, widget = self.fan.pop(random.randrange(0, len(self.fan)), recycle=False)
         widget.opacity = 1
+        # The widget has already been removed from the fan, so we have to
+        # reparent it into some suitable location. The fan's parent will
+        # usually be a good call.
         self.fan.parent.add_widget(widget)
+        # Finally, we want an animation sending the card into the discard pile.
         dt = math.hypot(widget.x-self.discard_pile.x, widget.y-self.discard_pile.y) / self.fan.linear_speed
         anim = Factory.Animation(
             x=self.discard_pile.x,
@@ -193,20 +215,26 @@ class CardFanApp(App):
             rotation=rotation_for_animation(widget.rotation, 0),
             duration=min(2,dt),
         )
-        anim.bind(on_complete=lambda *args: self.fan.recycle(widget))
+        anim.bind(on_complete=lambda *args: self.discard_complete(data['card'], widget))
         anim.start(widget)
 
-    def trash(self, which):
-        # Poof, into a puff of smoke
-        for n, c in enumerate(self.fan.cards):
-            if c['card'].name == which:
-                self.fan.pop(n)
-                return
+    def discard_complete(self, card, widget):
+        # When the discard animation completes, we can recycle the card
+        # widget to the fan and then add the card data to the discard pile.
+        # Here we don't bother remembering what is in the discard, we just
+        # show the most recent discard.
+        self.fan.recycle(widget)
+        self.discard_pile.card = card
+        self.discard_pile.show_front = True
 
     def shuffle(self):
+        # The fan will automatically handle any changes to its `cards`
+        # property, so reordering the list will reoder the cards (with
+        # animation)
         random.shuffle(self.fan.cards)
 
     def sort(self):
+        # Just more reordering
         self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
 
