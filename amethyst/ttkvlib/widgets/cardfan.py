@@ -23,14 +23,7 @@ from amethyst.core import Object, Attr
 
 from amethyst.games.filters import IFilterable
 
-def rotation_for_animation(a, b):
-    # Note: 0..360 even if a,b negative
-    a, b = a%360, b%360
-    if b - a < -180:
-        return b + 360
-    if b - a > 180:
-        return b - 360
-    return b
+from amethyst.ttkvlib.util import rotation_for_animation
 
 
 Builder.load_string('''
@@ -158,7 +151,7 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
 class CardFanState(Object):
     anim = Attr()
     data = Attr()
-    status = Attr()
+    status = Attr() # new, mv, ok, rm, recycle
     widget = Attr()
 
 class CardFan(Factory.FloatLayout):
@@ -183,6 +176,8 @@ class CardFan(Factory.FloatLayout):
 
     linear_speed = Factory.NumericProperty(inch(15))
     angular_speed = Factory.NumericProperty(60)
+    fade_time = Factory.NumericProperty(0.250)
+    max_animation_time = Factory.NumericProperty(2)
 
     # Informational (read-ony)
     actual_radius = Factory.NumericProperty()
@@ -192,10 +187,13 @@ class CardFan(Factory.FloatLayout):
         self._widget_cache = []
         self._by_data = {}
         self._by_widget = {}
-        self.register_event_type('on_removal')
-        self.register_event_type('on_ready')
+        self.register_event_type('on_removed')
+        self.register_event_type('on_added')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
+
+    def __len__(self):
+        return len(self.cards)
 
     def insert(self, index, data, *, widget=None):
         state = CardFanState(data=data, widget=widget, status=('mv' if widget else 'new'))
@@ -208,18 +206,21 @@ class CardFan(Factory.FloatLayout):
 
     def pop(self, index, recycle=True):
         data = self.cards.pop(index)
-        state = self._by_data.get(id(data), None)
-        # TODO: CHECK?
-        state.status = 'recycle' if recycle else 'rm'
-        return data
+        if recycle:
+            state = self._by_data.get(id(data), None)
+            state.status = 'recycle'
+            return data
+        else:
+            state = self._forget(data, None)
+            return state.data, state.widget
 
     def on_cards(self, obj, val):
         self.redraw()
 
-    def on_removal(self, data, widget):
+    def on_removed(self, data, widget):
         pass
 
-    def on_ready(self, data, widget):
+    def on_added(self, data, widget):
         pass
 
     def _animation_complete(self, anim, widget):
@@ -227,14 +228,30 @@ class CardFan(Factory.FloatLayout):
         if state is None:
             return
         state.anim = None
-        if state.status in ('rm', 'recycle'):
-            # TODO: Ensure not still in cards or children?
-            self._by_data.pop(id(state.data), None)
-            self._by_widget.pop(id(state.widget), None)
-            if state.status == 'rm':
-                self.dispatch('on_removal', state.data, state.widget)
-        elif state.status == 'ok':
-            self.dispatch('on_ready', state.data, state.widget)
+        if state.status == 'rm':
+            self._forget(state.data, widget)
+            self.dispatch('on_removed', state.data, state.widget)
+        elif state.status == 'recycle':
+            self.recycle(state.widget)
+            self.dispatch('on_removed', state.data, None)
+        elif state.status in ('new', 'mv'):
+            state.status = 'ok'
+            self.dispatch('on_added', state.data, state.widget)
+
+    def _forget(self, data, widget, remove=True):
+        # TODO: Option to ensure not still in cards or children?
+        state = self._by_widget.pop(id(widget), None)
+        state2 = self._by_data.pop(id(data), None)
+        if state is None:
+            state = state2
+        elif state2 is not None and state is not state2:
+            # If this happens we were sloppy somewhere
+            raise Exception("Expected consistent state")
+        if widget is not None:
+            self.remove_widget(widget)
+        elif state is not None and state.widget is not None:
+            self.remove_widget(state.widget)
+        return state
 
     def on_pos(self, obj, val):
         pass
@@ -246,85 +263,58 @@ class CardFan(Factory.FloatLayout):
 
         keep = set()
         for i, data in enumerate(self.cards):
-            widget = None
-            state = None
-            target = self.targets[i]
             state = self._by_data.get(id(data), None)
-            if state is None:
-                # data added to cards directly
-                widget = self.get_card_widget()
-                state = CardFanState(data=data, widget=widget, status='new')
+            if state is None: # data added to cards directly
+                state = CardFanState(data=data, widget=self.get_card_widget(), status='new')
             elif state.widget is None:
-                widget = self.get_card_widget()
-                state.widget = widget
+                state.widget = self.get_card_widget()
                 state.status = 'new'
-            else:
-                widget = state.widget
 
             if state.status is not 'ok':
-                self._update_widget(widget, data)
+                self._update_widget(state.widget, data)
 
             # Update cache for new creations:
             self._by_data[id(data)] = state
-            self._by_widget[id(widget)] = state
+            self._by_widget[id(state.widget)] = state
+            self.add_widget(state.widget)
             keep.add(id(data))
-            keep.add(id(widget))
-            self.add_widget(widget)
+            keep.add(id(state.widget))
 
-            widget.size_hint = (None, None)
-            widget.pos_hint = {}
-            widget.size = self.card_size
+            self._animate_to_target(state, self.targets[i])
 
-            anims = []
-            dt = 0
-            if state.status == 'new':
-                widget.opacity = 0
-                widget.center_x = target[0]
-                widget.center_y = target[1]
-                widget.rotation = target[2]
-                dt = min(2, self.max_angle / self.angular_speed / 3)
-                anims.append(Animation(opacity = 1, duration = dt))
-
-            elif state.status in ('mv', 'ok'):
-                if widget.opacity != 1:
-                    dt = min(2, self.max_angle / self.angular_speed / 3)
-                    anims.append(Animation(opacity = 1, duration = dt))
-
-                rot = rotation_for_animation(widget.rotation, target[2])
-                if not math.isclose(0, abs(widget.rotation - rot)):
-                    dt = min(2, abs(widget.rotation - rot) / self.angular_speed)
-                    anims.append(Animation(rotation = rot, duration = dt))
-
-                dx = abs(widget.center_x - target[0] - self.x)
-                dy = abs(widget.center_y - target[1] - self.y)
-                if dx > 1 or dy > 1:
-                    dt = min(2, hypot(dx, dy) / self.linear_speed)
-                    anims.append(Animation(center_x = target[0], center_y = target[1], duration = dt))
-
-                if widget.size != self.card_size:
-                    anims.append(Animation(size=self.card_size, duration = dt or 0.300))
-
-            else:
-                raise Exception("Didn't expect status '{}'".format(state.status))
-
-            if anims:
-                if state.anim:
-                    state.anim.cancel(state.widget)  # Kill without triggering complete
-                anim = anims.pop()
-                while anims:
-                    anim &= anims.pop()
-                anim.bind(on_complete=self._animation_complete)
-                state.anim = anim
-                anim.start(state.widget)
-
-            state.status = 'ok'
+        # Any thing to recycle?
+        for widget in widgets:
+            if id(widget) not in keep:
+                state = self._by_widget.get(id(widget), None)
+                if state is not None:
+                    if state.status == 'rm':
+                        # No need to remove widget, already gone from above
+                        self._forget(state.data, widget, remove=False)
+                        self.dispatch('on_removed', state.data, state.widget)
+                    else:
+                        # status might be new or ok if data was removed directly from self.cards
+                        state.status == 'recycle'
+                        if state.anim:
+                            state.anim.cancel(widget)  # Kill without triggering complete
+                        if widget.opacity > 0:
+                            dt = widget.opacity * self.fade_time
+                            state.anim = Animation(opacity=0, duration=dt)
+                            state.anim.bind(on_complete=self._animation_complete)
+                            state.anim.start(widget)
+                        else:
+                            self.recycle(widget)
+                            self.dispatch('on_removed', state.data, None)
 
     def recycle(self, widget):
+        self._forget(None, widget)
         if widget.parent:
             widget.parent.remove_widget(widget)
         if isinstance(widget, ICardFanReset):
             widget.clear()
-        self._widget_cache.append(widget)
+        # Don't allow the cache to grow forever.
+        n = len(self._widget_cache)
+        if n < 10 or n < 0.5 * len(self.cards):
+            self._widget_cache.append(widget)
 
     def on_card_widget(self, obj, val):
         # TODO: invalidate all existing widgets
@@ -393,3 +383,52 @@ class CardFan(Factory.FloatLayout):
             self.actual_radius = -1
             self.actual_spacing = spacing
             return [ (x + spacing*i, y, 0) for i in range(n) ]
+
+
+    def _animate_to_target(self, state, target):
+        widget = state.widget
+        widget.size_hint = (None, None)
+        widget.pos_hint = {}
+        anims = []
+        if state.status == 'new':
+            widget.opacity = 0
+            widget.size = self.card_size
+            widget.center_x = target[0]
+            widget.center_y = target[1]
+            widget.rotation = target[2]
+            anims.append(Animation(opacity = 1, duration = self.fade_time))
+
+        elif state.status in ('mv', 'ok'):
+            times = [ 0.050, self.fade_time ]
+            rot = rotation_for_animation(widget.rotation, target[2])
+            if not math.isclose(0, abs(widget.rotation - rot)):
+                dt = min(self.max_animation_time, abs(widget.rotation - rot) / self.angular_speed)
+                times.append(dt)
+                anims.append(Animation(rotation = rot, duration = dt))
+
+            dx = abs(widget.center_x - target[0])
+            dy = abs(widget.center_y - target[1])
+            if dx > 1 or dy > 1:
+                dt = min(self.max_animation_time, hypot(dx, dy) / self.linear_speed)
+                times.append(dt)
+                anims.append(Animation(center_x = target[0], center_y = target[1], duration = dt))
+
+            if widget.opacity != 1:
+                dt = self.fade_time * (1-widget.opacity)
+                anims.append(Animation(opacity = 1, duration = dt))
+
+            if widget.size != self.card_size:
+                anims.append(Animation(width=self.card_width, height=self.card_height, duration = max(times)))
+
+        else:
+            raise Exception("Didn't expect status '{}'".format(state.status))
+
+        if anims:
+            if state.anim:
+                state.anim.cancel(state.widget)  # Kill without triggering complete
+            anim = anims.pop()
+            for a in anims:
+                anim &= a
+            anim.bind(on_complete=self._animation_complete)
+            state.anim = anim
+            anim.start(state.widget)

@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
+import math
 import os.path
 import warnings
 ##
@@ -18,6 +19,7 @@ kivy.resources.resource_add_path(os.path.dirname(__file__))
 ##
 import amethyst.ttkvlib.widgets
 from amethyst.games.util import random, nonce
+from amethyst.ttkvlib.util import rotation_for_animation
 from amethyst.core import Object, Attr
 
 Builder.load_string("""
@@ -28,111 +30,115 @@ Builder.load_string("""
     size_hint_y: None
     height: self.minimum_height
 
-<MainScreen@BoxLayout>:
-    orientation: "vertical"
-
+<MainScreen@FloatLayout>:
     BoxLayout:
-        orientation: "horizontal"
-        size_hint_y: None
-        height: 100
-        Button:
-            text: "Add a '1'"
-            on_press: app.add(1)
-        Button:
-            text: "Add a '2'"
-            on_press: app.add(2)
-
-        Button:
-            text: "Draw"
-            on_press: app.draw()
-        Button:
-            text: "Discard Random"
-            on_press: app.discard()
-
-        Button:
-            text: "Shuffle Hand"
-            on_press: app.shuffle()
-        Button:
-            text: "Sort Hand"
-            on_press: app.sort()
-
-    BoxLayout:
-        orientation: "horizontal"
-        padding: (0, 32, 0, 16)
+        orientation: "vertical"
 
         BoxLayout:
-            orientation: "vertical"
-            size_hint_x: 0.3
-            spacing: 32
-            BoxLayout:
-                orientation: "horizontal"
-                height: self.minimum_height
-                VLabel:
-                    text: "Min radius"
-                VTextInput:
-                    id: min_radius
-                    text: "2000"
-                VLabel:
-                    text: "Actual: {:.2f}".format(fan.actual_radius)
-            BoxLayout:
-                orientation: "horizontal"
-                VLabel:
-                    text: "Max angle"
-                VTextInput:
-                    id: max_angle
-                    text: "60"
-                Label:
-            BoxLayout:
-                orientation: "horizontal"
-                VLabel:
-                    text: "Spacing"
-                VTextInput:
-                    id: spacing
-                    text: "48"
-                VLabel:
-                    text: "Actual: {:.2f}".format(fan.actual_spacing)
-            BoxLayout:
-                orientation: "horizontal"
-                VLabel:
-                    text: "Lift"
-                VTextInput:
-                    id: lift
-                    text: "48"
-                Label:
-            Label:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: 100
+            Button:
+                text: "Add a '1'"
+                on_press: app.add(1)
+            Button:
+                text: "Add a '2'"
+                on_press: app.add(2)
+            Button:
+                text: "Remove a '2'"
+                on_press: app.discard(2)
 
-        RelativeLayout:
-            size_hint_x: 0.7
+            Button:
+                text: "Draw"
+                on_press: app.draw()
+            Button:
+                text: "Discard Random"
+                on_press: app.discard()
+
+            Button:
+                text: "Shuffle Hand"
+                on_press: app.shuffle()
+            Button:
+                text: "Sort Hand"
+                on_press: app.sort()
+
+        BoxLayout:
+            orientation: "horizontal"
+            padding: (0, 32, 0, 16)
+
             BoxLayout:
                 orientation: "vertical"
-                pos_hint: {'x': 0.2, 'top': 1}
-                size_hint: (0.2, 0.4)
-                VLabel:
-                    text: "Draw"
-                CardImage:
-                    id: draw_pile
-                    back_source: 'card-back.png'
-                    show_front: False
-            BoxLayout:
-                orientation: "vertical"
-                pos_hint: {'x': 0.6, 'top': 1}
-                size_hint: (0.2, 0.4)
-                VLabel:
-                    text: "Discard"
-                CardImage:
-                    id: discard_pile
-                    back_source: 'card-back.png'
-                    show_front: False
-            CardFan:
-                id: fan
-                size_hint: (1, 0.6)
-                card_widget: 'CardImage'
-                card_size: draw_pile.size
-                on_ready: args[2].show_front = True
-                min_radius: int(min_radius.text or -1)
-                max_angle: int(max_angle.text or 60)
-                spacing: int(spacing.text or 48)
-                lift: int(lift.text or 48)
+                size_hint_x: 0.3
+                spacing: 32
+                BoxLayout:
+                    orientation: "horizontal"
+                    height: self.minimum_height
+                    VLabel:
+                        text: "Min radius"
+                    VTextInput:
+                        id: min_radius
+                        text: "2000"
+                    VLabel:
+                        text: "Actual: {:.2f}".format(fan.actual_radius)
+                BoxLayout:
+                    orientation: "horizontal"
+                    VLabel:
+                        text: "Max angle"
+                    VTextInput:
+                        id: max_angle
+                        text: "60"
+                    Label:
+                BoxLayout:
+                    orientation: "horizontal"
+                    VLabel:
+                        text: "Spacing"
+                    VTextInput:
+                        id: spacing
+                        text: "48"
+                    VLabel:
+                        text: "Actual: {:.2f}".format(fan.actual_spacing)
+                BoxLayout:
+                    orientation: "horizontal"
+                    VLabel:
+                        text: "Lift"
+                    VTextInput:
+                        id: lift
+                        text: "48"
+                    Label:
+                Label:
+
+            RelativeLayout:
+                size_hint_x: 0.7
+                BoxLayout:
+                    orientation: "vertical"
+                    pos_hint: {'x': 0.2, 'top': 1}
+                    size_hint: (0.2, 0.4)
+                    VLabel:
+                        text: "Draw"
+                    CardImage:
+                        id: draw_pile
+                        back_source: 'card-back.png'
+                        show_front: False
+                BoxLayout:
+                    orientation: "vertical"
+                    pos_hint: {'x': 0.6, 'top': 1}
+                    size_hint: (0.2, 0.4)
+                    VLabel:
+                        text: "Discard"
+                    CardImage:
+                        id: discard_pile
+                        back_source: 'card-back.png'
+                        show_front: False
+                CardFan:
+                    id: fan
+                    size_hint: (1, 0.6)
+                    card_widget: 'CardImage'
+                    card_size: (draw_pile.width + 75, draw_pile.height + 75)
+                    on_added: args[2].show_front = True
+                    min_radius: int(min_radius.text or -1)
+                    max_angle: int(max_angle.text or 60)
+                    spacing: int(spacing.text or 48)
+                    lift: int(lift.text or 48)
 
 """
 )
@@ -162,7 +168,7 @@ class CardFanApp(App):
             if c['card'].name > num:
                 break
         else:
-            n = len(self.fan.cards)
+            n = len(self.fan)
         self.fan.insert(n, dict(card=card), widget=widget)
 
     def draw(self):
@@ -171,8 +177,29 @@ class CardFanApp(App):
         img.copy_from(self.draw_pile)
         self.add(random.randrange(1, 6), widget=img)
 
-    def discard(self):
-        pass
+    def discard(self, which=None):
+        if 0 == len(self.fan):
+            return
+        if which is None:
+            data, widget = self.fan.pop(random.randrange(0, len(self.fan)), recycle=False)
+            widget.opacity = 1
+            self.fan.parent.add_widget(widget)
+            dt = math.hypot(widget.x-self.discard_pile.x, widget.y-self.discard_pile.y) / self.fan.linear_speed
+            anim = Factory.Animation(
+                x=self.discard_pile.x,
+                y=self.discard_pile.y,
+                width=self.discard_pile.width,
+                height=self.discard_pile.height,
+                rotation=rotation_for_animation(widget.rotation, 0),
+                duration=min(2,dt),
+            )
+            anim.bind(on_complete=lambda *args: self.fan.recycle(widget))
+            anim.start(widget)
+        else:
+            for n, c in enumerate(self.fan.cards):
+                if c['card'].name == which:
+                    self.fan.pop(n)
+                    break
 
     def shuffle(self):
         random.shuffle(self.fan.cards)
