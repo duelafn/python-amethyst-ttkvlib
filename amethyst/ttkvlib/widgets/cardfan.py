@@ -319,42 +319,6 @@ class CardFan(Factory.FloatLayout):
 
             state.status = 'ok'
 
-#     def insert(self, index, data, *, widget=None):
-#         if widget is None:
-#             widget = self.get_card_widget(data)
-#         widget._update_widget(data)
-#         children = self._get_children()
-#         self.cards.insert(index, data)
-#         children.insert(index, widget)
-#
-#     def remove(self, index, recycle=True):
-#
-#         pass
-#
-#
-#     def _get_children(self):
-#         return self.children[:] if self._children_todo is None else self._children_todo
-#
-#     def _set_children(self, widgets):
-#         self._children_todo = widget
-#         self.redraw()
-#
-#     def _redraw(self, dt=None):
-#         if self._children_todo is None:
-#             return
-#         self.clear_widgets()
-#         pos = self.calculate()
-#         anim = Animation(x=100, y=100)
-#
-#             [ (Cx0, Cy0, rot0), (Cx1, Cy1, rot1), ... ]
-#
-#         self._children_todo
-#
-# children = self.children[:]
-# for child in sorted(children):
-#     wid.add_widget(child)
-
-
     def recycle(self, widget):
         if widget.parent:
             widget.parent.remove_widget(widget)
