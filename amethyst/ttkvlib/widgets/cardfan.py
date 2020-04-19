@@ -191,6 +191,7 @@ class CardFan(Factory.FloatLayout):
         self.register_event_type('on_added')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
+        self.bind(size=self.redraw)
 
     def __len__(self):
         return len(self.cards)
