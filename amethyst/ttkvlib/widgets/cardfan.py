@@ -9,7 +9,6 @@ CardImage
 ICardFanReset
 '''.split()
 
-import copy
 import math
 from math import pi, radians, degrees, hypot, sin, cos
 pi_2 = pi/2
@@ -254,6 +253,10 @@ class CardFan(Factory.FloatLayout):
     def on_cards(self, obj, val):
         self.redraw()
 
+    def on_selected_nodes(self, obj, val):
+        self.redraw()
+
+
     def on_removed(self, data, widget):
         pass
 
@@ -262,6 +265,7 @@ class CardFan(Factory.FloatLayout):
 
     def on_selected(self, data, widget):
         pass
+
 
     def _animation_complete(self, anim, widget):
         state = self._by_widget.get(id(widget), None)
