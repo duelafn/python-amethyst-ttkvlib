@@ -14,6 +14,7 @@ Config.set('kivy', 'exit_on_escape', 1)
 from kivy.app import App
 from kivy.factory import Factory
 from kivy.lang import Builder
+import kivy.core.window
 import kivy.resources
 kivy.resources.resource_add_path(os.path.dirname(__file__))
 ##
@@ -182,6 +183,7 @@ class Card(Object):
 
 class CardFanApp(App):
     def build(self):
+        kivy.core.window.Window.bind(on_key_down=self.on_key_down)
         self.main = Factory.MainScreen()
         self.fan = self.main.ids['fan']
         self.draw_pile = self.main.ids['draw_pile']
@@ -265,5 +267,11 @@ class CardFanApp(App):
         # Just more reordering
         self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
+
+    def on_key_down(self, win, key, scancode, string, modifiers):
+        if key == 292: # F11
+            win.fullscreen = 'auto' if win.fullscreen is False else False
+            win.update_viewport()
+            return True
 
 CardFanApp().run()
