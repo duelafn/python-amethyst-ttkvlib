@@ -9,8 +9,9 @@ CardImage
 ICardFanReset
 '''.split()
 
+import copy
 import math
-from math import pi, radians, degrees, hypot, sin, cos, isclose
+from math import pi, radians, degrees, hypot, sin, cos
 pi_2 = pi/2
 
 from kivy.animation import Animation
@@ -148,11 +149,38 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
     def copy(self):
         return self.__class__().copy_from(self)
 
-class CardFanState(Object):
-    anim = Attr()
-    data = Attr()
-    status = Attr() # new, mv, ok, rm, recycle
-    widget = Attr()
+class CardTarget(object):
+    __slots__ = ('x', 'y', 'angle', 'rotation', 'sin', 'cos')
+    def __init__(self, x, y, angle=0):
+        self.x = x
+        self.y = y
+        if abs(angle) < 0.001:  # Snap to zero
+            self.angle = 0
+            self.rotation = 0
+            self.sin = 0
+            self.cos = 1
+        else:
+            self.angle = angle
+            self.rotation = degrees(angle)
+            self.sin = sin(angle)
+            self.cos = cos(angle)
+    def __str__(self):
+        return "({}, {}) radian={:.3f} degree={:.17f}".format(self.x, self.y, self.angle, self.rotation)
+
+    def rotated_vector(self, x, y):
+        return (self.cos * x - self.sin * y, self.sin * x + self.cos * y)
+
+    def rotated_size(self, w, h):
+        return (abs(self.cos) * w + abs(self.sin) * h, abs(self.sin) * w + abs(self.cos) * h)
+
+
+class CardFanState(object):
+    __slots__ = ('anim', 'data', 'status', 'widget')
+    def __init__(self, anim=None, data=None, status=None, widget=None):
+        self.anim = anim
+        self.data = data
+        self.status = status # new, mv, ok, rm, recycle
+        self.widget = widget
 
 class CardFan(Factory.FloatLayout):
     """
@@ -169,6 +197,7 @@ class CardFan(Factory.FloatLayout):
     card_height = Factory.NumericProperty(180)
     card_size = Factory.ReferenceListProperty(card_width, card_height)
 
+    true_center = Factory.BooleanProperty(False)  # When false, rotated cards dip below baseline
     min_radius = Factory.NumericProperty(-1)
     max_angle = Factory.BoundedNumericProperty(60, min=1, max=360)
     spacing = Factory.NumericProperty(48)
@@ -179,11 +208,11 @@ class CardFan(Factory.FloatLayout):
     max_animation_time = Factory.NumericProperty(2)
 
     multiselect = Factory.BooleanProperty(False)
+    selected_nodes = Factory.ListProperty()
 
     # Informational (read-ony)
     actual_radius = Factory.NumericProperty()
     actual_spacing = Factory.NumericProperty()
-    selected_nodes = Factory.ListProperty()
 
     circle_origin_x = Factory.NumericProperty(0)
     circle_origin_y = Factory.NumericProperty(0)
@@ -193,12 +222,12 @@ class CardFan(Factory.FloatLayout):
         self._widget_cache = []
         self._by_data = {}
         self._by_widget = {}
+        self._redraw_instant = False
         self.register_event_type('on_added')
         self.register_event_type('on_removed')
         self.register_event_type('on_selected')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
-        self.bind(size=self.redraw)
 
     def __len__(self):
         return len(self.cards)
@@ -264,8 +293,14 @@ class CardFan(Factory.FloatLayout):
             self.remove_widget(state.widget)
         return state
 
-    def on_pos(self, obj, val):
-        pass
+#     def on_pos(self, obj, val):
+#         pass
+    def on_size(self, obj, val):
+        # Either we did a full-screen resize in which case a discontinuous
+        # jump in positions is OK, or the fan is being resized slowly (a
+        # scatter or animation) in which case we don't need to stack animations.
+        self._redraw_instant = True
+        self.redraw()
 
     def _redraw(self, dt=None):
         self.targets = self.calculate()
@@ -292,6 +327,8 @@ class CardFan(Factory.FloatLayout):
             keep.add(id(state.widget))
 
             self._animate_to_target(state, self.targets[i])
+        # Done redrawing, clear flag if present
+        self._redraw_instant = False
 
         # Any thing to recycle?
         for widget in widgets:
@@ -328,8 +365,11 @@ class CardFan(Factory.FloatLayout):
             self._widget_cache.append(widget)
 
     def on_card_widget(self, obj, val):
-        # TODO: invalidate all existing widgets
-        self._widget_cache = []
+        self.clear_widgets()
+        self._by_data.clear()
+        self._by_widget.clear()
+        self._widget_cache.clear()
+        self.redraw()
 
     def get_card_widget(self):
         if self._widget_cache:
@@ -341,9 +381,9 @@ class CardFan(Factory.FloatLayout):
         for k, v in data.items():
             setattr(widget, k, v)
 
-    def calculate(self):
-        """fdasf
 
+    def calculate(self):
+        """
         Produce a list of card positions (x and y are the card LEFT and
         BOTTOM):
 
@@ -382,14 +422,14 @@ class CardFan(Factory.FloatLayout):
            x = center - cos(θ) card_width / 2 - sin(θ) card_height / 2
            y = center - sin(θ) card_width / 2 - cos(θ) card_height / 2
 
-        Look at all cases, we can simplify to:
+        All other cases similar, we can simplify to:
 
            x = center - (abs(cos(θ)) card_width + abs(sin(θ)) card_height) / 2
            y = center - (abs(sin(θ)) card_width + abs(cos(θ)) card_height) / 2
 
         """
         if not self.cards:
-            return None
+            return ()
         n = len(self.cards)
         # Full card width for the top card plus one spacing for each other card
         length_needed = self.card_width + self.spacing * (n - 1)
@@ -417,38 +457,40 @@ class CardFan(Factory.FloatLayout):
                     half_angle = math.asin( available_width / 2 / c_radius )
                     spacing = available_width / (n - 1)
 
-            # "rot": rotation for kivy; "theta": angle for math
-            rot_0 = degrees(half_angle)
-            d_rot = -(2 * rot_0) / (n - 1)
-
-            theta_0 = pi_2 + half_angle
-            d_theta = -(2 * half_angle) / (n - 1)
-
-            # x = center - (abs(cos(θ)) card_width + abs(sin(θ)) card_height) / 2
-            # y = center - (abs(sin(θ)) card_width + abs(cos(θ)) card_height) / 2
-            res = []
-            y_min = c_radius   # center card
-            for i in range(n):
-                theta = theta_0 + i*d_theta
-                cos_theta = cos(theta)
-                sin_theta = sin(theta)
-                x = c_radius * cos_theta - (abs(cos_theta) * self.card_width + abs(sin_theta) * self.card_height)/2
-                y = c_radius * sin_theta - (abs(sin_theta) * self.card_width + abs(cos_theta) * self.card_height)/2
-                if y < y_min:
-                    y_min = y
-                res.append((x, y, rot_0 + i * d_rot))
-
-            # TODO: Fix x_0 and y_0, y_min isn't what we were thinking, need to fix when awake
+            # Position offsets
             x_0 = self.width / 2
             y_0 = self.height / 2 - c_radius
-#             height = self.card_height + y_min - c_radius
-#             y_0 = self.height / 2 + height / 2 - self.card_height / 2 - c_radius
+
+            # Calculate positions
+            res = []
+            d_theta = -(2 * half_angle) / (n - 1)
+            y_min = c_radius - self.card_height/2
+            for i in range(n):
+                target = CardTarget(x_0, y_0, half_angle + i*d_theta)
+                w, h = target.rotated_size(self.card_width, self.card_height)
+                target.x += c_radius * cos(pi_2 + target.angle) - w/2
+                target.y += c_radius * sin(pi_2 + target.angle) - h/2
+                if target.y < y_min:
+                    y_min = target.y
+                if i in self.selected_nodes:
+                    dx, dy = target.rotated_vector(0, self.lift)
+                    target.x += dx
+                    target.y += dy
+                res.append(target)
+
+            # Rotated cards dip below baseline, optionally shift the cards
+            # up to true center.
+            if self.true_center:
+                height = c_radius + self.card_height/2 - y_min
+                y_off  = (height - self.card_height)/2
+                for t in res:
+                    t.y += y_off
 
             self.actual_radius = o_radius
             self.actual_spacing = spacing
             self.circle_origin_x = x_0
             self.circle_origin_y = y_0
-            return [ (x_0 + rv[0], y_0 + rv[1], rv[2]) for rv in res ]
+            return res
 
         else:
             # x, y are the bottom-left of the first card
@@ -462,7 +504,7 @@ class CardFan(Factory.FloatLayout):
             self.actual_spacing = spacing
             self.circle_origin_x = 0
             self.circle_origin_y = 0
-            return [ (x + spacing*i, y, 0) for i in range(n) ]
+            return [ CardTarget(x + spacing*i, y) for i in range(n) ]
 
 
     def _animate_to_target(self, state, target):
@@ -470,12 +512,20 @@ class CardFan(Factory.FloatLayout):
         widget.size_hint = (None, None)
         widget.pos_hint = {}
         anims = []
-        if state.status == 'new':
+
+        if self._redraw_instant and state.status == 'ok':
+            widget.opacity = 1
+            widget.size = self.card_size
+            widget.x = target.x
+            widget.y = target.y
+            widget.rotation = target.rotation
+
+        elif state.status == 'new':
             widget.opacity = 0
             widget.size = self.card_size
-            widget.x = target[0]
-            widget.y = target[1]
-            widget.rotation = target[2]
+            widget.x = target.x
+            widget.y = target.y
+            widget.rotation = target.rotation
             anims.append(Animation(opacity = 1, duration = self.fade_time))
 
         elif state.status in ('mv', 'ok'):
@@ -487,19 +537,19 @@ class CardFan(Factory.FloatLayout):
             # in the right place. Therefore, make sure the rotation is done
             # before we finish translation. If we won't have a translation,
             # force the rotation then reconsider whether we need a translation.
-            dx = abs(widget.x - target[0])
-            dy = abs(widget.y - target[1])
+            dx = abs(widget.x - target.x)
+            dy = abs(widget.y - target.y)
             if dx <= 1 and dy <= 1:
-                widget.rotation = target[2]
-                dx = abs(widget.x - target[0])
-                dy = abs(widget.y - target[1])
+                widget.rotation = target.rotation
+                dx = abs(widget.x - target.x)
+                dy = abs(widget.y - target.y)
             if dx > 1 or dy > 1:
                 dt = min(self.max_animation_time, hypot(dx, dy) / self.linear_speed)
                 times.append(dt)
-                anims.append(Animation(x = target[0], y = target[1], duration = dt))
+                anims.append(Animation(x = target.x, y = target.y, duration = dt))
 
-                rot = rotation_for_animation(widget.rotation, target[2])
-                if not isclose(0, abs(widget.rotation - rot)):
+                rot = rotation_for_animation(widget.rotation, target.rotation)
+                if abs(widget.rotation - rot) > 0.1: # 0.1 degree is sufficient precision
                     anims.append(Animation(rotation = rot, duration = 0.8 * dt))
 
             if widget.opacity != 1:
@@ -507,7 +557,7 @@ class CardFan(Factory.FloatLayout):
                 anims.append(Animation(opacity = 1, duration = dt))
 
             if widget.size != self.card_size:
-                anims.append(Animation(width=self.card_width, height=self.card_height, duration = max(times)))
+                anims.append(Animation(width=self.card_width, height=self.card_height, duration = 0.8 * max(times)))
 
         else:
             raise Exception("Didn't expect status '{}'".format(state.status))
