@@ -10,7 +10,7 @@ ICardFanReset
 '''.split()
 
 import math
-from math import pi, radians, degrees, hypot
+from math import pi, radians, degrees, hypot, sin, cos, isclose
 pi_2 = pi/2
 
 from kivy.animation import Animation
@@ -175,20 +175,27 @@ class CardFan(Factory.FloatLayout):
     lift = Factory.NumericProperty(48)
 
     linear_speed = Factory.NumericProperty(inch(15))
-    angular_speed = Factory.NumericProperty(60)
     fade_time = Factory.NumericProperty(0.250)
     max_animation_time = Factory.NumericProperty(2)
+
+    multiselect = Factory.BooleanProperty(False)
 
     # Informational (read-ony)
     actual_radius = Factory.NumericProperty()
     actual_spacing = Factory.NumericProperty()
+    selected_nodes = Factory.ListProperty()
+
+    circle_origin_x = Factory.NumericProperty(0)
+    circle_origin_y = Factory.NumericProperty(0)
+    circle_origin = Factory.ReferenceListProperty(circle_origin_x, circle_origin_y)
 
     def __init__(self, **kwargs):
         self._widget_cache = []
         self._by_data = {}
         self._by_widget = {}
-        self.register_event_type('on_removed')
         self.register_event_type('on_added')
+        self.register_event_type('on_removed')
+        self.register_event_type('on_selected')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
         self.bind(size=self.redraw)
@@ -222,6 +229,9 @@ class CardFan(Factory.FloatLayout):
         pass
 
     def on_added(self, data, widget):
+        pass
+
+    def on_selected(self, data, widget):
         pass
 
     def _animation_complete(self, anim, widget):
@@ -332,57 +342,126 @@ class CardFan(Factory.FloatLayout):
             setattr(widget, k, v)
 
     def calculate(self):
-        """
-        Produce a list of card positions (x and y are the card CENTERS,
-        relative to the widget):
+        """fdasf
 
-            [ (Cx0, Cy0, rot0), (Cx1, Cy1, rot1), ... ]
+        Produce a list of card positions (x and y are the card LEFT and
+        BOTTOM):
+
+            [ (x0, y0, rot0), (x1, y1, rot1), ... ]
+
+
+        The scatter widget rotates about the center of the card.
+
+                       *\
+                     -/  \
+                   -/     \
+                 -/        \
+               -/           \
+             -/              \
+            @                 \
+             \                 \
+              \                 \
+               \        @        \
+                \                 \
+                 \                 \
+                  \                 \
+                   \                 *
+                    \              -/
+                     \           -/
+                      \        -/
+                       \     -/
+            (x, y)      \  -/
+            *            */
+
+        We get trouble if we try animating center position, rotation, and
+        scale all at once. It is more stable if we animate position of
+        lower-left (x, y).
+
+        0 <= rotation <= 90: x from top-left, y from bottom-left
+
+           x = center - cos(θ) card_width / 2 - sin(θ) card_height / 2
+           y = center - sin(θ) card_width / 2 - cos(θ) card_height / 2
+
+        Look at all cases, we can simplify to:
+
+           x = center - (abs(cos(θ)) card_width + abs(sin(θ)) card_height) / 2
+           y = center - (abs(sin(θ)) card_width + abs(cos(θ)) card_height) / 2
+
         """
         if not self.cards:
             return None
         n = len(self.cards)
-        # Note the lies: We use a linear length here, but arc length later.
-        # Should be close enough and we can fix it later if necessary.
+        # Full card width for the top card plus one spacing for each other card
         length_needed = self.card_width + self.spacing * (n - 1)
         spacing = self.spacing
 
         if self.min_radius > 0 and n > 1:
-            radius = max(self.min_radius, length_needed / radians(self.max_angle))
-            half_angle = length_needed / radius / 2
+            # "angle" is spread of cards passing through the CENTER of the
+            # cardes since it is easier to work with. Thus, only the
+            # spacing needs covered by the angle.
+            o_radius = max(self.min_radius, self.spacing * (n - 1) / radians(self.max_angle))
+            half_angle = self.spacing * (n - 1) / o_radius / 2
+            # Radius through center
+            c_radius = o_radius - self.card_height / 2
 
-            x_width = 2 * radius * math.sin(half_angle)
-            if x_width > self.width:
-                # Shrink spacing until we fit
-                pass
+            # How wide will we be? We may need to shrink the spacing to
+            # fit. If configured for greater than 180° fan, assume game is
+            # ready for the size. Otherwise, reducing the spacing can help.
+            if half_angle < pi_2:
+                # rotation of the card, furthest point on X from center (twice for left and right)
+                beyond_center = cos(pi_2 + half_angle) * self.card_width + sin(pi_2 + half_angle) * self.card_height
+                available_width = self.width - beyond_center
+                # width from left card center to right card center
+                width = 2 * c_radius * sin(half_angle)
+                if width > available_width:
+                    half_angle = math.asin( available_width / 2 / c_radius )
+                    spacing = available_width / (n - 1)
 
-            # "theta": follows the center of the cards, so operates at r_center.
-            # "angle": follows the card rotation which follows the card edge which is our "angle" from before.
-            r_center = radius - self.card_height / 2
+            # "rot": rotation for kivy; "theta": angle for math
+            rot_0 = degrees(half_angle)
+            d_rot = -(2 * rot_0) / (n - 1)
 
-            half_theta = half_angle - self.card_width / radius / 2
-            theta_0 = pi_2 + half_theta
-            d_theta = -(2 * half_theta) / (n - 1)
+            theta_0 = pi_2 + half_angle
+            d_theta = -(2 * half_angle) / (n - 1)
 
-            angle_0 = degrees(half_angle)
-            d_angle = -(2 * angle_0) / (n - 1)
+            # x = center - (abs(cos(θ)) card_width + abs(sin(θ)) card_height) / 2
+            # y = center - (abs(sin(θ)) card_width + abs(cos(θ)) card_height) / 2
+            res = []
+            y_min = c_radius   # center card
+            for i in range(n):
+                theta = theta_0 + i*d_theta
+                cos_theta = cos(theta)
+                sin_theta = sin(theta)
+                x = c_radius * cos_theta - (abs(cos_theta) * self.card_width + abs(sin_theta) * self.card_height)/2
+                y = c_radius * sin_theta - (abs(sin_theta) * self.card_width + abs(cos_theta) * self.card_height)/2
+                if y < y_min:
+                    y_min = y
+                res.append((x, y, rot_0 + i * d_rot))
 
+            # TODO: Fix x_0 and y_0, y_min isn't what we were thinking, need to fix when awake
             x_0 = self.width / 2
-            y_0 = self.height / 2 - r_center
+            y_0 = self.height / 2 - c_radius
+#             height = self.card_height + y_min - c_radius
+#             y_0 = self.height / 2 + height / 2 - self.card_height / 2 - c_radius
 
-            self.actual_radius = radius
+            self.actual_radius = o_radius
             self.actual_spacing = spacing
-            return [ (x_0 + r_center * math.cos(theta_0 + i*d_theta), y_0 + r_center * math.sin(theta_0 + i*d_theta), angle_0 + i * d_angle) for i in range(n) ]
+            self.circle_origin_x = x_0
+            self.circle_origin_y = y_0
+            return [ (x_0 + rv[0], y_0 + rv[1], rv[2]) for rv in res ]
 
         else:
-            # x, y are the center of the first card
-            x = (self.width - length_needed + self.card_width) / 2
-            y = self.height / 2
+            # x, y are the bottom-left of the first card
+            x = (self.width - length_needed) / 2
+            y = self.height / 2 - self.card_height / 2
             # If container is too small, shrink the spacing and rely on lifting to see the cards
             if x < 0 and n >= 2:
                 x, spacing = (0, (self.width - self.card_width) / (n - 1))
 
             self.actual_radius = -1
             self.actual_spacing = spacing
+            self.circle_origin_x = 0
+            self.circle_origin_y = 0
             return [ (x + spacing*i, y, 0) for i in range(n) ]
 
 
@@ -394,25 +473,34 @@ class CardFan(Factory.FloatLayout):
         if state.status == 'new':
             widget.opacity = 0
             widget.size = self.card_size
-            widget.center_x = target[0]
-            widget.center_y = target[1]
+            widget.x = target[0]
+            widget.y = target[1]
             widget.rotation = target[2]
             anims.append(Animation(opacity = 1, duration = self.fade_time))
 
         elif state.status in ('mv', 'ok'):
             times = [ 0.050, self.fade_time ]
-            rot = rotation_for_animation(widget.rotation, target[2])
-            if not math.isclose(0, abs(widget.rotation - rot)):
-                dt = min(self.max_animation_time, abs(widget.rotation - rot) / self.angular_speed)
-                times.append(dt)
-                anims.append(Animation(rotation = rot, duration = dt))
 
-            dx = abs(widget.center_x - target[0])
-            dy = abs(widget.center_y - target[1])
+            # Rotation "corrects" the x and y position to preserve the
+            # center point (or something). In any case, if we finish our
+            # translation before finishing our rotation, the cards aren't
+            # in the right place. Therefore, make sure the rotation is done
+            # before we finish translation. If we won't have a translation,
+            # force the rotation then reconsider whether we need a translation.
+            dx = abs(widget.x - target[0])
+            dy = abs(widget.y - target[1])
+            if dx <= 1 and dy <= 1:
+                widget.rotation = target[2]
+                dx = abs(widget.x - target[0])
+                dy = abs(widget.y - target[1])
             if dx > 1 or dy > 1:
                 dt = min(self.max_animation_time, hypot(dx, dy) / self.linear_speed)
                 times.append(dt)
-                anims.append(Animation(center_x = target[0], center_y = target[1], duration = dt))
+                anims.append(Animation(x = target[0], y = target[1], duration = dt))
+
+                rot = rotation_for_animation(widget.rotation, target[2])
+                if not isclose(0, abs(widget.rotation - rot)):
+                    anims.append(Animation(rotation = rot, duration = 0.8 * dt))
 
             if widget.opacity != 1:
                 dt = self.fade_time * (1-widget.opacity)
