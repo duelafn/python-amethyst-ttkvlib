@@ -18,6 +18,7 @@ from kivy.factory import Factory
 from kivy.lang import Builder
 from kivy.metrics import inch
 from kivy.clock import Clock
+import kivy.graphics
 
 from amethyst.core import Object, Attr
 
@@ -386,6 +387,42 @@ class CardFan(Factory.FloatLayout):
             setattr(widget, k, v)
 
 
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            i, chld = self.card_at_point(*touch.pos)
+            if i in self.selected_nodes:
+                self.selected_nodes.remove(i)
+            else:
+                self.selected_nodes.append(i)
+
+    def card_at_point(self, x, y):
+        n = len(self.children)-1
+        if not hasattr(self, "_fbo"):
+            self._fbo = kivy.graphics.Fbo(size=self.size, with_stencilbuffer=True)
+        self._fbo.size = self.size   # Kivy recreates fbo only if size changes - convenient
+        for i, chld in enumerate(self.children):
+            canvas_index = self.canvas.indexof(chld.canvas)
+            if canvas_index > -1:
+                self.canvas.remove(chld.canvas)
+
+            try:
+                with self._fbo:
+                    kivy.graphics.ClearColor(0, 0, 0, 0)
+                    kivy.graphics.ClearBuffers()
+
+                self._fbo.add(chld.canvas)
+                try:
+                    self._fbo.draw()
+                    if self._fbo.get_pixel_color(x, y)[3] > 50:
+                        return n-i, chld
+                finally:
+                    self._fbo.remove(chld.canvas)
+            finally:
+                if canvas_index > -1:
+                    self.canvas.insert(canvas_index, chld.canvas)
+        return None, None
+
+
     def calculate(self):
         """
         Produce a list of card positions (x and y are the card LEFT and
@@ -508,7 +545,7 @@ class CardFan(Factory.FloatLayout):
             self.actual_spacing = spacing
             self.circle_origin_x = 0
             self.circle_origin_y = 0
-            return [ CardTarget(x + spacing*i, y) for i in range(n) ]
+            return [ CardTarget(x + spacing*i, y + self.lift * (i in self.selected_nodes)) for i in range(n) ]
 
 
     def _animate_to_target(self, state, target):
