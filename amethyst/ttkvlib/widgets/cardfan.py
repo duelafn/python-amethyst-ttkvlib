@@ -175,12 +175,13 @@ class CardTarget(object):
 
 
 class CardFanState(object):
-    __slots__ = ('anim', 'data', 'status', 'widget')
-    def __init__(self, anim=None, data=None, status=None, widget=None):
+    __slots__ = ('anim', 'data', 'status', 'widget', 'target')
+    def __init__(self, anim=None, data=None, status=None, widget=None, target=None):
         self.anim = anim
         self.data = data
         self.status = status # new, mv, ok, rm, recycle
         self.widget = widget
+        self.target = widget
 
 class CardFan(Factory.FloatLayout):
     """
@@ -281,6 +282,7 @@ class CardFan(Factory.FloatLayout):
             self.dispatch('on_removed', state.data, None)
         elif state.status in ('new', 'mv'):
             state.status = 'ok'
+            self._instant_to_target(state)
             self.dispatch('on_added', state.data, state.widget)
 
     def _forget(self, data, widget, remove=True):
@@ -308,7 +310,7 @@ class CardFan(Factory.FloatLayout):
         self.redraw()
 
     def _redraw(self, dt=None):
-        self.targets = self.calculate()
+        targets = self.calculate()
         widgets = self.children[:]
         self.clear_widgets()
 
@@ -323,6 +325,7 @@ class CardFan(Factory.FloatLayout):
 
             if state.status is not 'ok':
                 self._update_widget(state.widget, data)
+            state.target = targets[i]
 
             # Update cache for new creations:
             self._by_data[id(data)] = state
@@ -331,7 +334,7 @@ class CardFan(Factory.FloatLayout):
             keep.add(id(data))
             keep.add(id(state.widget))
 
-            self._animate_to_target(state, self.targets[i])
+            self._animate_to_target(state)
         # Done redrawing, clear flag if present
         self._redraw_instant = False
 
@@ -389,13 +392,18 @@ class CardFan(Factory.FloatLayout):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            i, chld = self.card_at_point(*touch.pos)
+            i = self.card_at_point(*touch.pos)
             if i in self.selected_nodes:
                 self.selected_nodes.remove(i)
             else:
                 self.selected_nodes.append(i)
 
     def card_at_point(self, x, y):
+        """
+        Returns the card number (index in the cards list) of the card
+        visible at the given touch position.
+        """
+        # Modified from kivy.uix.widget.Widget#export_to_png()
         n = len(self.children)-1
         if not hasattr(self, "_fbo"):
             self._fbo = kivy.graphics.Fbo(size=self.size, with_stencilbuffer=True)
@@ -414,13 +422,13 @@ class CardFan(Factory.FloatLayout):
                 try:
                     self._fbo.draw()
                     if self._fbo.get_pixel_color(x, y)[3] > 50:
-                        return n-i, chld
+                        return n-i
                 finally:
                     self._fbo.remove(chld.canvas)
             finally:
                 if canvas_index > -1:
                     self.canvas.insert(canvas_index, chld.canvas)
-        return None, None
+        return None
 
 
     def calculate(self):
@@ -548,25 +556,32 @@ class CardFan(Factory.FloatLayout):
             return [ CardTarget(x + spacing*i, y + self.lift * (i in self.selected_nodes)) for i in range(n) ]
 
 
-    def _animate_to_target(self, state, target):
+    def _instant_to_target(self, state):
+        widget = state.widget
+        widget.size_hint = (None, None)
+        widget.pos_hint = {}
+        widget.opacity = 1
+        widget.size = self.card_size
+        widget.x = state.target.x
+        widget.y = state.target.y
+        widget.rotation = state.target.rotation
+
+    def _animate_to_target(self, state):
+        if self._redraw_instant and state.status == 'ok':
+            self._instant_to_target(state)
+            return
+
         widget = state.widget
         widget.size_hint = (None, None)
         widget.pos_hint = {}
         anims = []
 
-        if self._redraw_instant and state.status == 'ok':
-            widget.opacity = 1
-            widget.size = self.card_size
-            widget.x = target.x
-            widget.y = target.y
-            widget.rotation = target.rotation
-
-        elif state.status == 'new':
+        if state.status == 'new':
             widget.opacity = 0
             widget.size = self.card_size
-            widget.x = target.x
-            widget.y = target.y
-            widget.rotation = target.rotation
+            widget.x = state.target.x
+            widget.y = state.target.y
+            widget.rotation = state.target.rotation
             anims.append(Animation(opacity = 1, duration = self.fade_time))
 
         elif state.status in ('mv', 'ok'):
@@ -578,18 +593,18 @@ class CardFan(Factory.FloatLayout):
             # in the right place. Therefore, make sure the rotation is done
             # before we finish translation. If we won't have a translation,
             # force the rotation then reconsider whether we need a translation.
-            dx = abs(widget.x - target.x)
-            dy = abs(widget.y - target.y)
+            dx = abs(widget.x - state.target.x)
+            dy = abs(widget.y - state.target.y)
             if dx <= 1 and dy <= 1:
-                widget.rotation = target.rotation
-                dx = abs(widget.x - target.x)
-                dy = abs(widget.y - target.y)
+                widget.rotation = state.target.rotation
+                dx = abs(widget.x - state.target.x)
+                dy = abs(widget.y - state.target.y)
             if dx > 1 or dy > 1:
                 dt = min(self.max_animation_time, hypot(dx, dy) / self.linear_speed)
                 times.append(dt)
-                anims.append(Animation(x = target.x, y = target.y, duration = dt))
+                anims.append(Animation(x = state.target.x, y = state.target.y, duration = dt))
 
-                rot = rotation_for_animation(widget.rotation, target.rotation)
+                rot = rotation_for_animation(widget.rotation, state.target.rotation)
                 if abs(widget.rotation - rot) > 0.1: # 0.1 degree is sufficient precision
                     anims.append(Animation(rotation = rot, duration = 0.8 * dt))
 
