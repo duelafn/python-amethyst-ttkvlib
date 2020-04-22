@@ -10,6 +10,7 @@ ICardFanReset
 '''.split()
 
 import math
+import time
 from math import pi, radians, degrees, hypot, sin, cos
 pi_2 = pi/2
 
@@ -175,13 +176,14 @@ class CardTarget(object):
 
 
 class CardFanState(object):
-    __slots__ = ('anim', 'data', 'status', 'widget', 'target')
-    def __init__(self, anim=None, data=None, status=None, widget=None, target=None):
+    __slots__ = ('anim', 'data', 'status', 'widget', 'target', 'index')
+    def __init__(self, anim=None, data=None, status=None, widget=None, target=None, index=None):
         self.anim = anim
         self.data = data
         self.status = status # new, mv, ok, rm, recycle
         self.widget = widget
-        self.target = widget
+        self.target = target
+        self.index = index
 
 class CardFan(Factory.FloatLayout):
     """
@@ -207,9 +209,10 @@ class CardFan(Factory.FloatLayout):
     linear_speed = Factory.NumericProperty(inch(15))
     fade_time = Factory.NumericProperty(0.250)
     max_animation_time = Factory.NumericProperty(2)
+    long_press_time = Factory.NumericProperty(0.500)
+    gesture_distance = Factory.NumericProperty(inch(0.5))
 
-    multiselect = Factory.BooleanProperty(False)
-    selected_nodes = Factory.ListProperty()
+    lifted_cards = Factory.ListProperty()
 
     # Informational (read-ony)
     actual_radius = Factory.NumericProperty()
@@ -224,9 +227,10 @@ class CardFan(Factory.FloatLayout):
         self._by_data = {}
         self._by_widget = {}
         self._redraw_instant = False
-        self.register_event_type('on_added')
-        self.register_event_type('on_removed')
-        self.register_event_type('on_selected')
+        self.register_event_type('on_card_add')
+        self.register_event_type('on_card_remove')
+        self.register_event_type('on_card_select')
+        self.register_event_type('on_card_hover')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
 
@@ -255,17 +259,66 @@ class CardFan(Factory.FloatLayout):
     def on_cards(self, obj, val):
         self.redraw()
 
-    def on_selected_nodes(self, obj, val):
+    def on_lifted_cards(self, obj, val):
         self.redraw()
 
 
-    def on_removed(self, data, widget):
+    def on_card_add(self, index, data, widget):
+        """
+        Card newly added to the fan. This event is triggered after the card
+        animation (fade in or move to position) has completed.
+
+        NOTE: The index passed to this function is the card's index at the
+        time that the function is called. That index is may change if cards
+        are added or removed from the fan.
+        """
         pass
 
-    def on_added(self, data, widget):
+    def on_card_remove(self, data, widget):
+        """
+        Card removed from the fan. This function is called after the widget
+        is removed from the fan's list of children.
+
+        If the card is to be recycled, this function will be called after
+        the fade-out animation completes. In this case, the widget
+        parameter will be None.
+
+        If the card was removed without recycling (for instance, via
+        `.pop(recycle=False)`), then this function will be called while the
+        card is still opaque and in position. However, since the widget no
+        longer has a parent, it will not be visible in the next render
+        frame unless it is added to another suitable parent. At that point,
+        it is the responsibility of the caller to manage the widget.
+
+        Note: typically, you will either handle the orphaned widget either
+        when you call .pop() or in the .on_card_remove() function but not
+        both.
+        """
         pass
 
-    def on_selected(self, data, widget):
+    def on_card_select(self, how, index):
+        """
+        Called when the user selects a card by tap or gesture. This widget
+        will not automatically add the card to the list of lifted_cards,
+        that should be done by this callback if appropriate.
+
+        The `select` parameter is set to True if the card index is
+        currently ABSENT from the lifted_cards list (meaning the function
+        call is a selection request).
+
+        :param how: Method of selection. Is one of: "tap" or "gesture"
+        """
+        pass
+
+    def on_card_hover(self, hover, index):
+        """
+        EXPERIMENTAL - DO NOT USE!
+
+        Called when the user focuses on a card by mouse hover or gesture.
+        Only one card can be hovered at a time, and when the hover changes,
+        `on_card_hover(hover=False)` will be called for the old card before
+        `on_card_hover(hover=True)` is called for the new hover.
+        """
         pass
 
 
@@ -276,14 +329,14 @@ class CardFan(Factory.FloatLayout):
         state.anim = None
         if state.status == 'rm':
             self._forget(state.data, widget)
-            self.dispatch('on_removed', state.data, state.widget)
+            self.dispatch('on_card_remove', state.data, state.widget)
         elif state.status == 'recycle':
             self.recycle(state.widget)
-            self.dispatch('on_removed', state.data, None)
+            self.dispatch('on_card_remove', state.data, None)
         elif state.status in ('new', 'mv'):
             state.status = 'ok'
             self._instant_to_target(state)
-            self.dispatch('on_added', state.data, state.widget)
+            self.dispatch('on_card_add', state.index, state.data, state.widget)
 
     def _forget(self, data, widget, remove=True):
         # TODO: Option to ensure not still in cards or children?
@@ -325,6 +378,7 @@ class CardFan(Factory.FloatLayout):
 
             if state.status is not 'ok':
                 self._update_widget(state.widget, data)
+            state.index = i
             state.target = targets[i]
 
             # Update cache for new creations:
@@ -346,7 +400,7 @@ class CardFan(Factory.FloatLayout):
                     if state.status == 'rm':
                         # No need to remove widget, already gone from above
                         self._forget(state.data, widget, remove=False)
-                        self.dispatch('on_removed', state.data, state.widget)
+                        self.dispatch('on_card_remove', state.data, state.widget)
                     else:
                         # status might be new or ok if data was removed directly from self.cards
                         state.status == 'recycle'
@@ -357,9 +411,9 @@ class CardFan(Factory.FloatLayout):
                             state.anim = Animation(opacity=0, duration=dt)
                             state.anim.bind(on_complete=self._animation_complete)
                             state.anim.start(widget)
-                        else:
+                        else: # Unlikely - only if user triggers a fade before removing
                             self.recycle(widget)
-                            self.dispatch('on_removed', state.data, None)
+                            self.dispatch('on_card_remove', state.data, None)
 
     def recycle(self, widget):
         self._forget(None, widget)
@@ -392,11 +446,50 @@ class CardFan(Factory.FloatLayout):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            i = self.card_at_point(*touch.pos)
-            if i in self.selected_nodes:
-                self.selected_nodes.remove(i)
-            else:
-                self.selected_nodes.append(i)
+            touch.grab(self)
+            touch.ud['cardfan:index'] = index = self.card_at_point(*touch.pos)
+            touch.ud['cardfan:time'] = time.monotonic()
+            if index is not None:
+                self.dispatch('on_card_hover', True, index)
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is self:
+            index = self.card_at_point(*self._scale_to_radius(*touch.pos))
+
+            if touch.ud['cardfan:index'] != index:
+                if touch.ud['cardfan:index'] is not None:
+                    self.dispatch('on_card_hover', False, touch.ud['cardfan:index'])
+                touch.ud['cardfan:index'] = index
+                if index is not None:
+                    self.dispatch('on_card_hover', True, index)
+
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is self:
+            touch.ungrab(self)
+            if touch.ud['cardfan:index'] is not None:
+                self.dispatch('on_card_hover', False, touch.ud['cardfan:index'])
+                if self.gesture_distance and self._touch_radius(*touch.pos) > self.actual_radius + self.gesture_distance:
+                    self.dispatch('on_card_select', 'gesture', touch.ud['cardfan:index'])
+                elif time.monotonic() - touch.ud['cardfan:time'] < self.long_press_time:
+                    self.dispatch('on_card_select', 'tap', touch.ud['cardfan:index'])
+
+
+    def _touch_radius(self, x, y):
+            return hypot(x - self.circle_origin_x, y - self.circle_origin_y)
+
+    def _scale_to_radius(self, x, y):
+        X, Y = x, y
+        if self.actual_radius == -1:
+            if y > self.circle_origin_y + 0.95 * self.card_height:
+                y = self.circle_origin_y + 0.95 * self.card_height
+        else:
+            a, b = x - self.circle_origin_x, y - self.circle_origin_y
+            radius = hypot(a,b)
+            if radius > self.actual_radius > 1:
+                scale = (self.actual_radius - 0.05 * self.card_height) / radius
+                x, y = scale * a + self.circle_origin_x, scale * b + self.circle_origin_y
+        return (x, y)
 
     def card_at_point(self, x, y):
         """
@@ -408,26 +501,29 @@ class CardFan(Factory.FloatLayout):
         if not hasattr(self, "_fbo"):
             self._fbo = kivy.graphics.Fbo(size=self.size, with_stencilbuffer=True)
         self._fbo.size = self.size   # Kivy recreates fbo only if size changes - convenient
+
         for i, chld in enumerate(self.children):
-            canvas_index = self.canvas.indexof(chld.canvas)
-            if canvas_index > -1:
-                self.canvas.remove(chld.canvas)
-
-            try:
-                with self._fbo:
-                    kivy.graphics.ClearColor(0, 0, 0, 0)
-                    kivy.graphics.ClearBuffers()
-
-                self._fbo.add(chld.canvas)
-                try:
-                    self._fbo.draw()
-                    if self._fbo.get_pixel_color(x, y)[3] > 50:
-                        return n-i
-                finally:
-                    self._fbo.remove(chld.canvas)
-            finally:
+            # First try the cheap rectangular bounding-box test
+            if chld.collide_point(x, y):
+                canvas_index = self.canvas.indexof(chld.canvas)
                 if canvas_index > -1:
-                    self.canvas.insert(canvas_index, chld.canvas)
+                    self.canvas.remove(chld.canvas)
+
+                try:
+                    with self._fbo:
+                        kivy.graphics.ClearColor(0, 0, 0, 0)
+                        kivy.graphics.ClearBuffers()
+
+                    self._fbo.add(chld.canvas)
+                    try:
+                        self._fbo.draw()
+                        if self._fbo.get_pixel_color(x, y)[3] > 50:
+                            return n-i
+                    finally:
+                        self._fbo.remove(chld.canvas)
+                finally:
+                    if canvas_index > -1:
+                        self.canvas.insert(canvas_index, chld.canvas)
         return None
 
 
@@ -521,7 +617,7 @@ class CardFan(Factory.FloatLayout):
                 target.y += c_radius * sin(pi_2 + target.angle) - h/2
                 if target.y < y_min:
                     y_min = target.y
-                if i in self.selected_nodes:
+                if i in self.lifted_cards:
                     dx, dy = target.rotated_vector(0, self.lift)
                     target.x += dx
                     target.y += dy
@@ -551,9 +647,9 @@ class CardFan(Factory.FloatLayout):
 
             self.actual_radius = -1
             self.actual_spacing = spacing
-            self.circle_origin_x = 0
-            self.circle_origin_y = 0
-            return [ CardTarget(x + spacing*i, y + self.lift * (i in self.selected_nodes)) for i in range(n) ]
+            self.circle_origin_x = x
+            self.circle_origin_y = y
+            return [ CardTarget(x + spacing*i, y + self.lift * (i in self.lifted_cards)) for i in range(n) ]
 
 
     def _instant_to_target(self, state):

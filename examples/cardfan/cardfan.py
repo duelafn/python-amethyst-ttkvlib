@@ -157,8 +157,9 @@ Builder.load_string("""
                     card_widget: 'CardImage'
                     card_width:  draw_pile.width + 75
                     card_height: draw_pile.height + 75
+                    lifted_cards: app.selected + [app.hovered]
 
-                    on_added: args[2].show_front = True
+                    on_card_add: args[3].show_front = True
 
                     min_radius: int(min_radius.text or -1)
                     max_angle: int(max_angle.text or 60)
@@ -182,10 +183,15 @@ class Card(Object):
 
 
 class CardFanApp(App):
+    hovered = Factory.NumericProperty(None, allownone=True)
+    selected = Factory.ListProperty()
+
     def build(self):
         kivy.core.window.Window.bind(on_key_down=self.on_key_down)
         self.main = Factory.MainScreen()
         self.fan = self.main.ids['fan']
+        self.fan.bind(on_card_select=self.on_card_select)
+        self.fan.bind(on_card_hover=self.on_card_hover)
         self.draw_pile = self.main.ids['draw_pile']
         self.discard_pile = self.main.ids['discard_pile']
         return self.main
@@ -223,13 +229,15 @@ class CardFanApp(App):
                 self.fan.pop(n) # returns the dict() we inserted above, but we don't need it
                 return
 
-    def discard(self):
+    def discard(self, index=None):
         # When discarding we have more work to do ourselves. If we pop with
         # `recycle=False`, the fan will return our original data dictionary
         # and also the widget for the card.
         if 0 == len(self.fan):
             return
-        data, widget = self.fan.pop(random.randrange(0, len(self.fan)), recycle=False)
+        if index is None:
+            index = random.randrange(0, len(self.fan))
+        data, widget = self.fan.pop(index, recycle=False)
         widget.opacity = 1
         # The widget has already been removed from the fan, so we have to
         # reparent it into some suitable location. The fan's parent will
@@ -267,6 +275,20 @@ class CardFanApp(App):
         # Just more reordering
         self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
+    def on_card_select(self, obj, how, index):
+        if how == 'tap':
+            if index in self.selected:
+                self.selected.remove(index)
+            else:
+                self.selected.append(index)
+        else:
+            self.discard(index)
+
+    def on_card_hover(self, obj, hover, index):
+        if hover:
+            self.hovered = index
+        else:
+            self.hovered = None
 
     def on_key_down(self, win, key, scancode, string, modifiers):
         if key == 292: # F11
