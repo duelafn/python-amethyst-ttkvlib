@@ -35,7 +35,7 @@ sdist: test
 	python3 setup.py sdist
 
 test:
-	python3 -E -B -m nose --with-coverage --verbosity=0 --cover-package=amethyst.ttkvlib tests
+	python3 -m pytest --cov=amethyst/ --cov-branch --cov-report=html:_coverage tests
 
 zip: test
 	python3 setup.py sdist --format=zip

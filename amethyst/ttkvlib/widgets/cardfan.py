@@ -584,7 +584,7 @@ class CardFan(Factory.FloatLayout):
 
 
     def calculate(self):
-        """
+        r"""
         Produce a list of card positions (x and y are the card LEFT and
         BOTTOM):
 
