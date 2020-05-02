@@ -51,7 +51,7 @@ class App(kivy.app.App):
         }
 
 
-    def dispatch_notice(self, game, seq, player, notice):
+    def dispatch_notice(self, game, seq, player_num, notice):
         """
         Convenient dispatcher for game notices. If you attach this method
         as a game observer,
@@ -62,7 +62,7 @@ class App(kivy.app.App):
         instance, if your game has a "start_turn" action, then whenever the it
         is called, this dispatcher will call:
 
-            myapp.on_notice_call_start_turn(game, player, notice.data):
+            myapp.on_notice_call_start_turn(game, player_num, notice.data):
 
         By default, all standard plugins in amethyst.games will be
         dispatched. Notice types can be added or removed from the
@@ -79,7 +79,7 @@ class App(kivy.app.App):
         if notice.type in self.notice_dispatchers:
             cb = getattr(self, f"on_{self.notice_dispatchers[notice.type]}_{notice.name}", None)
             if cb and callable(cb):
-                cb(game, player, notice.data)
+                cb(game, player_num, notice.data)
 
 
     def user_conf(*names, **kwargs):
