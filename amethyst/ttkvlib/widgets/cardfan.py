@@ -11,6 +11,7 @@ ICardFanReset
 
 import math
 import time
+import warnings
 from math import pi, radians, degrees, hypot, sin, cos
 pi_2 = pi/2
 
@@ -39,6 +40,7 @@ Builder.load_string('''
         source: (root.source if root.show_front else root.back_source) or ''
 
 <CardFan>:
+    default_drag_distance: min(inch(.125), self.card_width/10, self.card_height/10)
 ''')
 
 
@@ -209,8 +211,9 @@ class CardFan(Factory.FloatLayout):
     linear_speed = Factory.NumericProperty(inch(15))
     fade_time = Factory.NumericProperty(0.250)
     max_animation_time = Factory.NumericProperty(2)
-    long_press_time = Factory.NumericProperty(0.500)
-    gesture_distance = Factory.NumericProperty(inch(0.5))
+    long_press_time = Factory.NumericProperty(0.75)
+    drag_distance = Factory.NumericProperty(None, allownone=True)
+    default_drag_distance = Factory.NumericProperty(inch(.125))
 
     lifted_cards = Factory.ListProperty()
 
@@ -229,8 +232,10 @@ class CardFan(Factory.FloatLayout):
         self._redraw_instant = False
         self.register_event_type('on_card_add')
         self.register_event_type('on_card_remove')
-        self.register_event_type('on_card_select')
-        self.register_event_type('on_card_hover')
+        self.register_event_type('on_card_press')
+        self.register_event_type('on_card_long_press')
+        self.register_event_type('on_card_drag')
+        self.register_event_type('on_card_drop')
         super().__init__(**kwargs)
         self.redraw = Clock.create_trigger(self._redraw)
 
@@ -296,7 +301,7 @@ class CardFan(Factory.FloatLayout):
         """
         pass
 
-    def on_card_select(self, how, index):
+    def on_card_press(self, index, data, widget, touch):
         """
         Called when the user selects a card by tap or gesture. This widget
         will not automatically add the card to the list of lifted_cards,
@@ -310,15 +315,13 @@ class CardFan(Factory.FloatLayout):
         """
         pass
 
-    def on_card_hover(self, hover, index):
-        """
-        EXPERIMENTAL - DO NOT USE!
+    def on_card_long_press(self, index, data, widget, touch):
+        pass
 
-        Called when the user focuses on a card by mouse hover or gesture.
-        Only one card can be hovered at a time, and when the hover changes,
-        `on_card_hover(hover=False)` will be called for the old card before
-        `on_card_hover(hover=True)` is called for the new hover.
-        """
+    def on_card_drag(self, index, data, widget, touch):
+        pass
+
+    def on_card_drop(self, index, data, widget, touch):
         pass
 
 
@@ -353,8 +356,6 @@ class CardFan(Factory.FloatLayout):
             self.remove_widget(state.widget)
         return state
 
-#     def on_pos(self, obj, val):
-#         pass
     def on_size(self, obj, val):
         # Either we did a full-screen resize in which case a discontinuous
         # jump in positions is OK, or the fan is being resized slowly (a
@@ -446,50 +447,60 @@ class CardFan(Factory.FloatLayout):
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            touch.grab(self)
-            touch.ud['cardfan:index'] = index = self.card_at_point(*touch.pos)
-            touch.ud['cardfan:time'] = time.monotonic()
-            if index is not None:
-                self.dispatch('on_card_hover', True, index)
+            index = self.card_at_point(*touch.pos)
+            state = self._by_data.get(id(self.cards[index])) if index is not None else None
+            if index is not None and state is not None:
+                touch.grab(self)
+                touch.ud['cardfan:state'] = state
+                touch.ud['cardfan:type'] = None
+                if self.long_press_time:
+                    touch.ud['cardfan:lpcb'] = Clock.schedule_once(
+                        lambda *args: self._maybe_long_press(touch),
+                        self.long_press_time
+                    )
 
     def on_touch_move(self, touch):
         if touch.grab_current is self:
-            index = self.card_at_point(*self._scale_to_radius(*touch.pos))
-
-            if touch.ud['cardfan:index'] != index:
-                if touch.ud['cardfan:index'] is not None:
-                    self.dispatch('on_card_hover', False, touch.ud['cardfan:index'])
-                touch.ud['cardfan:index'] = index
-                if index is not None:
-                    self.dispatch('on_card_hover', True, index)
-
+            state = touch.ud['cardfan:state']
+            if touch.ud['cardfan:type'] is None:
+                # Taxicab metric is fine
+                dx, dy = touch.ox - touch.x, touch.oy - touch.y
+                dist = abs(dx) + abs(dy)
+                if self.drag_distance != 0 and dist > (self.drag_distance or self.default_drag_distance):
+                    touch.ud['cardfan:type'] = 'drag'
+                    self.dispatch('on_card_drag', state.index, state.data, state.widget, touch)
+                    if touch.ud['cardfan:type'] == 'drag':
+                        if state.anim:
+                            state.anim.cancel(state.widget)  # Kill without triggering complete
+                        state.widget.x += dx
+                        state.widget.y += dy
+            elif touch.ud['cardfan:type'] == 'drag':
+                state.widget.x += touch.dx
+                state.widget.y += touch.dy
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:
             touch.ungrab(self)
-            if touch.ud['cardfan:index'] is not None:
-                self.dispatch('on_card_hover', False, touch.ud['cardfan:index'])
-                if self.gesture_distance and self._touch_radius(*touch.pos) > self.actual_radius + self.gesture_distance:
-                    self.dispatch('on_card_select', 'gesture', touch.ud['cardfan:index'])
-                elif time.monotonic() - touch.ud['cardfan:time'] < self.long_press_time:
-                    self.dispatch('on_card_select', 'tap', touch.ud['cardfan:index'])
+            state = touch.ud['cardfan:state']
+            longpress = touch.ud.pop('cardfan:lpcb', None)
+            if longpress:
+                longpress.cancel()
+            if touch.ud['cardfan:type'] is None:
+                self.dispatch('on_card_press', state.index, state.data, state.widget, touch)
+            elif touch.ud['cardfan:type'] == 'drag':
+                self.dispatch('on_card_drop', state.index, state.data, state.widget, touch)
+            elif touch.ud['cardfan:type'] == 'longpress':
+                pass
+            else:
+                warnings.warn("CardFan: Unexpected event type".format(touch.ud['cardfan:type']))
+            self.redraw()
 
-
-    def _touch_radius(self, x, y):
-            return hypot(x - self.circle_origin_x, y - self.circle_origin_y)
-
-    def _scale_to_radius(self, x, y):
-        X, Y = x, y
-        if self.actual_radius == -1:
-            if y > self.circle_origin_y + 0.95 * self.card_height:
-                y = self.circle_origin_y + 0.95 * self.card_height
-        else:
-            a, b = x - self.circle_origin_x, y - self.circle_origin_y
-            radius = hypot(a,b)
-            if radius > self.actual_radius > 1:
-                scale = (self.actual_radius - 0.05 * self.card_height) / radius
-                x, y = scale * a + self.circle_origin_x, scale * b + self.circle_origin_y
-        return (x, y)
+    def _maybe_long_press(self, touch):
+        if touch and not touch.ud['cardfan:type']:
+            touch.ud['cardfan:type'] = 'longpress'
+            state = touch.ud['cardfan:state']
+            self.dispatch('on_card_long_press', state.index, state.data, state.widget, touch)
+            del touch.ud['cardfan:lpcb']
 
     def card_at_point(self, x, y):
         """

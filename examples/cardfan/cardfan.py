@@ -160,6 +160,7 @@ Builder.load_string("""
                     lifted_cards: app.selected + [app.hovered]
 
                     on_card_add: args[3].show_front = True
+                    on_card_long_press: print("Long press card {}".format(args[1]))
 
                     min_radius: int(min_radius.text or -1)
                     max_angle: int(max_angle.text or 60)
@@ -190,8 +191,8 @@ class CardFanApp(App):
         kivy.core.window.Window.bind(on_key_down=self.on_key_down)
         self.main = Factory.MainScreen()
         self.fan = self.main.ids['fan']
-        self.fan.bind(on_card_select=self.on_card_select)
-        self.fan.bind(on_card_hover=self.on_card_hover)
+        self.fan.bind(on_card_press=self.on_card_press)
+        self.fan.bind(on_card_drop=self.on_card_drop)
         self.draw_pile = self.main.ids['draw_pile']
         self.discard_pile = self.main.ids['discard_pile']
         return self.main
@@ -275,20 +276,15 @@ class CardFanApp(App):
         # Just more reordering
         self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
-    def on_card_select(self, obj, how, index):
-        if how == 'tap':
-            if index in self.selected:
-                self.selected.remove(index)
-            else:
-                self.selected.append(index)
+    def on_card_press(self, obj, index, data, widget, touch):
+        if index in self.selected:
+            self.selected.remove(index)
         else:
-            self.discard(index)
+            self.selected.append(index)
 
-    def on_card_hover(self, obj, hover, index):
-        if hover:
-            self.hovered = index
-        else:
-            self.hovered = None
+    def on_card_drop(self, obj, index, data, widget, touch):
+        if self.discard_pile.collide_point(*touch.pos):
+            self.discard(index)
 
     def on_key_down(self, win, key, scancode, string, modifiers):
         if key == 292: # F11
