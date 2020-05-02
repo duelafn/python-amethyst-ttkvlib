@@ -182,7 +182,7 @@ class CardFanState(object):
     def __init__(self, anim=None, data=None, status=None, widget=None, target=None, index=None):
         self.anim = anim
         self.data = data
-        self.status = status # new, mv, ok, rm, recycle
+        self.status = status # new, mv, ok, rm, recycle, busy
         self.widget = widget
         self.target = target
         self.index = index
@@ -241,6 +241,8 @@ class CardFan(Factory.FloatLayout):
 
     def __len__(self):
         return len(self.cards)
+    def __getitem__(self, i):
+        return self.cards[i]
 
     def insert(self, index, data, *, widget=None):
         state = CardFanState(data=data, widget=widget, status=('mv' if widget else 'new'))
@@ -459,6 +461,9 @@ class CardFan(Factory.FloatLayout):
                         self.long_press_time
                     )
 
+    def touch_type(self, touch):
+        return touch.ud.get('cardfan:type', None)
+
     def on_touch_move(self, touch):
         if touch.grab_current is self:
             state = touch.ud['cardfan:state']
@@ -469,14 +474,49 @@ class CardFan(Factory.FloatLayout):
                 if self.drag_distance != 0 and dist > (self.drag_distance or self.default_drag_distance):
                     touch.ud['cardfan:type'] = 'drag'
                     self.dispatch('on_card_drag', state.index, state.data, state.widget, touch)
-                    if touch.ud['cardfan:type'] == 'drag':
+                    if touch.ud['cardfan:type'] == 'drag': # drag hasn't been aborted
                         if state.anim:
                             state.anim.cancel(state.widget)  # Kill without triggering complete
+                        state.status = 'busy'
                         state.widget.x += dx
                         state.widget.y += dy
             elif touch.ud['cardfan:type'] == 'drag':
-                state.widget.x += touch.dx
-                state.widget.y += touch.dy
+                for st in self._dragged(touch):
+                    st.widget.x += touch.dx
+                    st.widget.y += touch.dy
+
+    def add_to_drag(self, i, touch):
+        if touch.ud['cardfan:type'] == 'drag':
+            if 'cardfan:dragged' not in touch.ud:
+                touch.ud['cardfan:dragged'] = set()
+
+            state = self._by_data.get(id(self[i]))
+            if state and state is not touch.ud.get('cardfan:state', None):
+                if state not in touch.ud['cardfan:dragged']:
+                    touch.ud['cardfan:dragged'].add(state)
+                    state.status = 'busy'
+                    state.widget.x += touch.ox - touch.x
+                    state.widget.y += touch.oy - touch.y
+
+    def abort_drag(self, touch):
+        state = touch.ud['cardfan:state']
+        state.status = 'ok'
+        for st in self._dragged(touch):
+            if st.status == 'busy':
+                st.status = 'ok'
+        touch.ud['cardfan:type'] = None
+        self.redraw()
+
+    def _dragged(self, touch):
+        if touch.ud['cardfan:type'] == 'drag':
+            yield touch.ud['cardfan:state']
+        if 'cardfan:dragged' in touch.ud:
+            for state in touch.ud['cardfan:dragged']:
+                yield state
+
+    def dragged(self, touch):
+        for state in self._dragged(touch):
+            yield state.index, state.data, state.widget
 
     def on_touch_up(self, touch):
         if touch.grab_current is self:
@@ -493,6 +533,11 @@ class CardFan(Factory.FloatLayout):
                 pass
             else:
                 warnings.warn("CardFan: Unexpected event type".format(touch.ud['cardfan:type']))
+            if state.status == 'busy':
+                state.status = 'ok'
+            for st in self._dragged(touch):
+                if st.status == 'busy':
+                    st.status = 'ok'
             self.redraw()
 
     def _maybe_long_press(self, touch):
@@ -721,6 +766,9 @@ class CardFan(Factory.FloatLayout):
 
             if widget.size != self.card_size:
                 anims.append(Animation(width=self.card_width, height=self.card_height, duration = 0.8 * max(times)))
+
+        elif state.status == 'busy':
+            pass   # Currently in a drag or other operation, do not animate
 
         else:
             raise Exception("Didn't expect status '{}'".format(state.status))

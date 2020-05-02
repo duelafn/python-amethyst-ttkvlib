@@ -157,7 +157,6 @@ Builder.load_string("""
                     card_widget: 'CardImage'
                     card_width:  draw_pile.width + 75
                     card_height: draw_pile.height + 75
-                    lifted_cards: app.selected + [app.hovered]
 
                     on_card_add: args[3].show_front = True
                     on_card_long_press: print("Long press card {}".format(args[1]))
@@ -184,8 +183,6 @@ class Card(Object):
 
 
 class CardFanApp(App):
-    hovered = Factory.NumericProperty(None, allownone=True)
-    selected = Factory.ListProperty()
 
     def build(self):
         kivy.core.window.Window.bind(on_key_down=self.on_key_down)
@@ -277,10 +274,10 @@ class CardFanApp(App):
         self.fan.cards = sorted(self.fan.cards, key=lambda data: data['card'].name)
 
     def on_card_press(self, obj, index, data, widget, touch):
-        if index in self.selected:
-            self.selected.remove(index)
+        if index in self.fan.lifted_cards:
+            self.fan.lifted_cards.remove(index)
         else:
-            self.selected.append(index)
+            self.fan.lifted_cards.append(index)
 
     def on_card_drop(self, obj, index, data, widget, touch):
         if self.discard_pile.collide_point(*touch.pos):
