@@ -42,9 +42,12 @@ class App(kivy.app.App):
     def __init__(self):
         super().__init__()
         self.notice_dispatchers = {
-            ":call": "notice_call",
-            ":grant": "notice_grant",
-            ":expire": "notice_expire",
+            "::call":      "notice_call",
+            "::chat":      "notice_chat",
+            "::expire":    "notice_expire",
+            "::grant":     "notice_grant",
+            "::init":      "notice_init",
+            "::store-set": "notice_store_set",
         }
 
 

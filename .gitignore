@@ -1,3 +1,6 @@
+
+/_coverage
+
 # Python Ignores
 *.egg
 *.egg-info
@@ -17,3 +20,4 @@ nosetests.xml
 parts
 pip-log.txt
 sdist
+\
