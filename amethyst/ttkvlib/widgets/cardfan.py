@@ -555,8 +555,8 @@ class CardFan(Factory.FloatLayout):
         # Modified from kivy.uix.widget.Widget#export_to_png()
         n = len(self.children)-1
         if not hasattr(self, "_fbo"):
-            self._fbo = kivy.graphics.Fbo(size=self.size, with_stencilbuffer=True)
-        self._fbo.size = self.size   # Kivy recreates fbo only if size changes - convenient
+            self._fbo = kivy.graphics.Fbo(size=(self.right, self.top), with_stencilbuffer=True)
+        self._fbo.size = (self.right, self.top)   # Kivy recreates fbo only if size changes - convenient
 
         for i, chld in enumerate(self.children):
             # First try the cheap rectangular bounding-box test
@@ -709,13 +709,14 @@ class CardFan(Factory.FloatLayout):
 
 
     def _instant_to_target(self, state):
+        x, y = self.pos
         widget = state.widget
         widget.size_hint = (None, None)
         widget.pos_hint = {}
         widget.opacity = 1
         widget.size = self.card_size
-        widget.x = state.target.x
-        widget.y = state.target.y
+        widget.x = state.target.x + x
+        widget.y = state.target.y + y
         widget.rotation = state.target.rotation
 
     def _animate_to_target(self, state):
@@ -723,6 +724,7 @@ class CardFan(Factory.FloatLayout):
             self._instant_to_target(state)
             return
 
+        x, y = self.pos
         widget = state.widget
         widget.size_hint = (None, None)
         widget.pos_hint = {}
@@ -731,8 +733,8 @@ class CardFan(Factory.FloatLayout):
         if state.status == 'new':
             widget.opacity = 0
             widget.size = self.card_size
-            widget.x = state.target.x
-            widget.y = state.target.y
+            widget.x = x + state.target.x
+            widget.y = y + state.target.y
             widget.rotation = state.target.rotation
             anims.append(Animation(opacity = 1, duration = self.fade_time))
 
@@ -745,16 +747,16 @@ class CardFan(Factory.FloatLayout):
             # in the right place. Therefore, make sure the rotation is done
             # before we finish translation. If we won't have a translation,
             # force the rotation then reconsider whether we need a translation.
-            dx = abs(widget.x - state.target.x)
-            dy = abs(widget.y - state.target.y)
+            dx = abs(widget.x - state.target.x - x)
+            dy = abs(widget.y - state.target.y - y)
             if dx <= 1 and dy <= 1:
                 widget.rotation = state.target.rotation
-                dx = abs(widget.x - state.target.x)
-                dy = abs(widget.y - state.target.y)
+                dx = abs(widget.x - state.target.x - x)
+                dy = abs(widget.y - state.target.y - y)
             if dx > 1 or dy > 1:
                 dt = min(self.max_animation_time, hypot(dx, dy) / self.linear_speed)
                 times.append(dt)
-                anims.append(Animation(x = state.target.x, y = state.target.y, duration = dt))
+                anims.append(Animation(x = state.target.x + x, y = state.target.y + y, duration = dt))
 
                 rot = rotation_for_animation(widget.rotation, state.target.rotation)
                 if abs(widget.rotation - rot) > 0.1: # 0.1 degree is sufficient precision
