@@ -20,4 +20,3 @@ nosetests.xml
 parts
 pip-log.txt
 sdist
-\

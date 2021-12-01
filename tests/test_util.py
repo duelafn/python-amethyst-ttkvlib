@@ -8,7 +8,7 @@ sys.path.insert(1, dirname(dirname(abspath(__file__))))
 
 import unittest
 
-from amethyst.ttkvlib.util import rotation_for_animation
+from amethyst_ttkvlib.util import rotation_for_animation
 
 
 class MyTest(unittest.TestCase):

@@ -12,7 +12,7 @@ from kivy.factory import Factory
 from kivy.tests.common import GraphicUnitTest, UnitTestTouch
 from kivy.base import EventLoop
 
-from amethyst.ttkvlib.widgets.cardfan import CardFan, CardImage, ICardFanReset
+from amethyst_ttkvlib.widgets.cardfan import CardFan, CardImage, ICardFanReset
 
 class Card(object):
     def __init__(self, id, source):

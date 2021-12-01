@@ -16,17 +16,18 @@ from math import pi, radians, degrees, hypot, sin, cos
 pi_2 = pi/2
 
 from kivy.animation import Animation
+from kivy.clock import Clock
 from kivy.factory import Factory
+from kivy.graphics.transformation import Matrix
 from kivy.lang import Builder
 from kivy.metrics import inch
-from kivy.clock import Clock
 import kivy.graphics
 
 from amethyst.core import Object, Attr
 
-from amethyst.games.filters import IFilterable
+from amethyst_games.filters import IFilterable
 
-from amethyst.ttkvlib.util import rotation_for_animation
+from amethyst_ttkvlib.util import rotation_for_animation
 
 
 Builder.load_string('''
@@ -34,6 +35,14 @@ Builder.load_string('''
     do_rotation: False
     do_scale: False
     do_translation: False
+
+    canvas.after:
+        Color:
+            rgba: (1,0,0,0.75)
+        Ellipse:
+            pos: (self.x-3,self.y-3)
+            size: (6,6)
+
     Image:
         id: img
         size: root.size
@@ -108,6 +117,11 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
     the `source` property will be used by the child Image, when False the
     `back_source` property will be used by the child Image.
 
+    :ivar bl: Alias property which will set position of the "bottom left"
+    corner of the card taking rotation into account. The "bottom left" is
+    the point which would be bottom left at 0 rotation. After rotation, of
+    course, it may no longer be bottom left.
+
     :ivar name: Delegate (read-only) to `card.name` (or None) in order to
     fulfill IFilterable contract. Not used by CarFan.
 
@@ -125,6 +139,29 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
 
     show_front = Factory.BooleanProperty(True)
 
+    def _get_bl(self):
+        # Vector from center to bl in parent coordinates when not rotated
+        dxp1, dyp1 = -self.width/2, -self.height/2
+        # Vector from center to bl in parent coordinates when rotated
+        s, c = sin(radians(self.rotation)), cos(radians(self.rotation))
+        dxp2, dyp2 = (c * dxp1 - s * dyp1, s * dxp1 + c * dyp1)
+        return (self.center_x + dxp2, self.center_y + dyp2)
+    def _set_bl(self, pos):
+        # Vector from bl to center in parent coordinates when not rotated
+        dxp1, dyp1 = self.width/2, self.height/2
+        # Vector from bl to center in parent coordinates when rotated
+        s, c = sin(radians(self.rotation)), cos(radians(self.rotation))
+        dxp2, dyp2 = (c * dxp1 - s * dyp1, s * dxp1 + c * dyp1)
+        # Get center
+        cx, cy = pos[0] + dxp2, pos[1] + dyp2
+        # Check for no change
+        if abs(cx-self.center_x) < 1e-7 and abs(cy-self.center_y) < 1e-7:
+            return False
+        self.center = (cx, cy)
+        return True
+    bl = Factory.AliasProperty(_get_bl, _set_bl, bind=['pos'])
+
+
     def clear(self):
         """
         Reset attributes to original values. Potentially free-ing the card
@@ -137,12 +174,75 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
         self._id = self._source = self._back_source = NOVALUE
 
 
-    def copy_from(self, src):
-        for attr in ("size_hint", "pos_hint", "size", "pos"):
-            setattr(self, attr, getattr(src, attr, None))
+    def magic2(self, a, b, rel=None):
+        while not hasattr(a, 'transform_inv') and a.parent is not None and a is not a.parent:
+            a = a.parent
+        while not hasattr(b, 'transform') and b.parent is not None and b is not b.parent:
+            b = b.parent
+
+        if hasattr(a, 'transform_inv') and hasattr(b, 'transform'):
+            print("A")
+            return a.transform_inv.multiply(b.transform)
+        elif hasattr(a, 'transform_inv'):
+            print("B")
+            return a.transform_inv
+        elif hasattr(b, 'transform'):
+            print("C")
+            return b.transform
+        else:
+            return None
+
+    def magic(self, a, b, rel=None):
+        b.size_hint = (None, None)
+        b.pos_hint = dict()
+
+        scale, rot = 1, 0
+        x, y = a.center
+        print("\nA")
+        if isinstance(a, Factory.Scatter):
+            print(f"scale={a.scale}, rot={a.rotation}")
+            scale, rot = a.scale, a.rotation
+
+        print("B")
+        widget = getattr(a, 'parent', None)
+        while widget is not None:
+            if isinstance(widget, Factory.Scatter):
+                print(widget.scale, widget.rotation)
+                scale *= widget.scale
+                rot += widget.rotation
+                print(f"{(x, y)} -> {widget.to_parent(x, y)}; scale=>{scale}, rot=>{rot}; transform={widget.transform}")
+                x, y = widget.to_parent(x, y)
+            p = getattr(widget, 'parent', None)
+            widget = None if p is widget else p
+
+        print("C")
+        widget = rel or b.widget
+        while widget is not None:
+            if isinstance(widget, Factory.Scatter):
+                print(widget.scale, widget.rotation)
+                if widget.scale:
+                    scale /= widget.scale
+                rot -= widget.rotation
+                print(f"{(x, y)} -> {widget.to_local(x, y)}; scale=>{scale}, rot=>{rot}; transform_inv={widget.transform_inv}")
+                x, y = widget.to_local(x, y)
+            p = getattr(widget, 'parent', None)
+            widget = None if p is widget else p
+
+        if isinstance(b, Factory.Scatter):
+            b.scale = scale
+            b.rotation = rot
+        b.size = a.size
+        b.center = (x, y)
+
+    def copy_from(self, src, relative_to=None):
+#         self.transform.set(flat=src.transform.get())
+        if relative_to and src.parent:
+            self.magic(src.parent, self, rel=relative_to)
+        else:
+            self.transform.set(flat=src.transform.get())
+            self.pos = src.pos
         for attr in ("do_rotation", "do_scale", "scale_min", "scale_max", "do_translation_x", "do_translation_y"):
             setattr(self, attr, getattr(src, attr, None))
-        self.transform.set(flat=src.transform.get())
         for attr in ("card", "show_front"):
             setattr(self, attr, getattr(src, attr, None))
         for attr in ("_id", "_source", "_back_source", "_name", "_flags"):
@@ -153,6 +253,19 @@ class CardImage(ICardFanReset, IFilterable, RevisionTracking, Factory.Scatter):
         return self.__class__().copy_from(self)
 
 class CardTarget(object):
+    """
+    Internally used object for tracking a Scatter target positions and rotation.
+
+    (x, y)    - (bottom-left) target position of the card
+
+    angle     - (radians) angle of line passing through middle of the card
+                in Kivy coordinates (0 degrees is up). This is the angle
+                used in computing positions.
+
+    rotation  - (degrees) target rotation of the Scatter, just degrees(angle)
+    sin       - precomputed sin(angle)
+    cos       - precomputed cos(angle)
+    """
     __slots__ = ('x', 'y', 'angle', 'rotation', 'sin', 'cos')
     def __init__(self, x, y, angle=0):
         self.x = x
@@ -168,16 +281,25 @@ class CardTarget(object):
             self.sin = sin(angle)
             self.cos = cos(angle)
     def __str__(self):
-        return "({}, {}) radian={:.3f} degree={:.17f}".format(self.x, self.y, self.angle, self.rotation)
+        return "({}, {}) radian={:.3f} degree={:.1f}".format(self.x, self.y, self.angle, self.rotation)
 
     def rotated_vector(self, x, y):
+        """
+        Rotate a vector by the target angle.
+        """
         return (self.cos * x - self.sin * y, self.sin * x + self.cos * y)
 
     def rotated_size(self, w, h):
+        """
+        Size of (minimal) bounding box containing the rotated card.
+        """
         return (abs(self.cos) * w + abs(self.sin) * h, abs(self.sin) * w + abs(self.cos) * h)
 
 
 class CardFanState(object):
+    """
+    Internal object for tracking state of a card.
+    """
     __slots__ = ('anim', 'data', 'status', 'widget', 'target', 'index')
     def __init__(self, anim=None, data=None, status=None, widget=None, target=None, index=None):
         self.anim = anim
@@ -208,9 +330,9 @@ class CardFan(Factory.FloatLayout):
     spacing = Factory.NumericProperty(48)
     lift = Factory.NumericProperty(48)
 
-    linear_speed = Factory.NumericProperty(inch(15))
+    linear_speed = Factory.NumericProperty(inch(1))
     fade_time = Factory.NumericProperty(0.250)
-    max_animation_time = Factory.NumericProperty(2)
+    max_animation_time = Factory.NumericProperty(20)
     long_press_time = Factory.NumericProperty(0.75)
     drag_distance = Factory.NumericProperty(None, allownone=True)
     default_drag_distance = Factory.NumericProperty(inch(.125))
@@ -460,6 +582,7 @@ class CardFan(Factory.FloatLayout):
                         lambda *args: self._maybe_long_press(touch),
                         self.long_press_time
                     )
+                return True
 
     def touch_type(self, touch):
         return touch.ud.get('cardfan:type', None)
@@ -484,6 +607,7 @@ class CardFan(Factory.FloatLayout):
                 for st in self._dragged(touch):
                     st.widget.x += touch.dx
                     st.widget.y += touch.dy
+            return True
 
     def add_to_drag(self, i, touch):
         if touch.ud['cardfan:type'] == 'drag':
@@ -539,6 +663,7 @@ class CardFan(Factory.FloatLayout):
                 if st.status == 'busy':
                     st.status = 'ok'
             self.redraw()
+            return True
 
     def _maybe_long_press(self, touch):
         if touch and not touch.ud['cardfan:type']:
@@ -638,7 +763,7 @@ class CardFan(Factory.FloatLayout):
 
         if self.min_radius > 0 and n > 1:
             # "angle" is spread of cards passing through the CENTER of the
-            # cardes since it is easier to work with. Thus, only the
+            # cards since it is easier to work with. Thus, only the
             # spacing needs covered by the angle.
             o_radius = max(self.min_radius, self.spacing * (n - 1) / radians(self.max_angle))
             half_angle = self.spacing * (n - 1) / o_radius / 2

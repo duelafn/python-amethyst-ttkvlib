@@ -15,6 +15,8 @@ import pathlib
 from kivy.factory import Factory
 import kivy.app
 
+import amethyst_ttkvlib.behaviors.slate
+
 
 def _xdg_path(env, default, app, names, file=False, mkdir=False):
     path = pathlib.Path(os.environ[env] if env in os.environ else default)
@@ -28,61 +30,16 @@ def _xdg_path(env, default, app, names, file=False, mkdir=False):
     return pathlib.Path(path)
 
 
-class App(kivy.app.App):
+class App(Factory.PlayerSlateBehavior, kivy.app.App):
     """
     :cvar XDG_APP: Name of your application. Is used by the `user_*()`
     methods as the app's XDG subdirectory.
-
-    :ivar notice_dispatchers: Dictionary mapping amethyst game NoticeType
-    to callback prefixes for automatic dispatch. See the
-    `dispatch_notice()` method below for details.
     """
-    XDG_APP = None
 
-    def __init__(self):
-        super().__init__()
-        self.notice_dispatchers = {
-            "::call":      "notice_call",
-            "::chat":      "notice_chat",
-            "::expire":    "notice_expire",
-            "::grant":     "notice_grant",
-            "::init":      "notice_init",
-            "::store-set": "notice_store_set",
-        }
+    def _(self, key):
+        return key
 
-
-    def dispatch_notice(self, game, seq, player_num, notice):
-        """
-        Convenient dispatcher for game notices. If you attach this method
-        as a game observer,
-
-            game.observe(player_num, myapp.dispatch_notice)
-
-        Then any known notice types will be forwarded to app methods. For
-        instance, if your game has a "start_turn" action, then whenever the it
-        is called, this dispatcher will call:
-
-            myapp.on_notice_call_start_turn(game, player_num, notice.data):
-
-        By default, all standard plugins in amethyst.games will be
-        dispatched. Notice types can be added or removed from the
-        `notice_dispatchers` attribute. For instance, to ignore GRANT
-        notices:
-
-            myapp.notice_dispatchers.pop(amethyst.games.notice.NoticeType.GRANT, None)
-
-        Or to dispatch a WHISPER notice from a custom plugin,
-
-            myapp.notice_dispatchers[amethyst.games.notice.NoticeType.WHISPER] = "notice_whisper"
-            # now whisper notices will dispatch to f"on_notice_whisper_{notice.name}"
-        """
-        if notice.type in self.notice_dispatchers:
-            cb = getattr(self, f"on_{self.notice_dispatchers[notice.type]}_{notice.name}", None)
-            if cb and callable(cb):
-                cb(game, player_num, notice.data)
-
-
-    def user_conf(*names, **kwargs):
+    def user_conf(self, *names, **kwargs):
         """
         :param mkdir: When True, create the directory if it does not exist.
 
@@ -100,7 +57,7 @@ class App(kivy.app.App):
         """
         return _xdg_path('XDG_CONFIG_HOME', os.path.expanduser("~/.config"), self.XDG_APP, names, **kwargs)
 
-    def user_data(*names, **kwargs):
+    def user_data(self, *names, **kwargs):
         """
         :param mkdir: When True, create the directory if it does not exist.
 
@@ -118,7 +75,7 @@ class App(kivy.app.App):
         """
         return _xdg_path('XDG_DATA_HOME', os.path.expanduser("~/.local/share"), self.XDG_APP, names, **kwargs)
 
-    def user_cache(*names, **kwargs):
+    def user_cache(self, *names, **kwargs):
         """
         :param mkdir: When True, create the directory if it does not exist.
 

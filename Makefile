@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0
 
 PKGNAME = amethyst-ttkvlib
-PKG_VERSION = $(shell python3 -c 'import re; print(re.search("__version__ = \"([\d.]+)\"", open("amethyst/ttkvlib/__init__.py").read()).group(1))')
-PY_PATHS = amethyst/ttkvlib tests
+PKG_VERSION = $(shell python3 -c 'import re; print(re.search("__version__ = \"([\d.]+)\"", open("amethyst_ttkvlib/__init__.py").read()).group(1))')
+PY_PATHS = amethyst_ttkvlib examples tests
 
 .PHONY: all sdist dist debbuild clean test
 
 
 check:
-	@find amethyst tests setup.py -type f -not -empty -exec perl -nE '($$hit = 1), exit if /SPDX\-License\-Identifier/; END { $$hit or say "$$ARGV: MISSING SPDX-License-Identifier" }' {} \;
+	@find amethyst_ttkvlib tests setup.py -type f -not -empty -exec perl -nE '($$hit = 1), exit if /SPDX\-License\-Identifier/; END { $$hit or say "$$ARGV: MISSING SPDX-License-Identifier" }' {} \;
 	python3 -m flake8 --config=extra/flake8.ini ${PY_PATHS}
 	@echo OK
 
@@ -35,7 +35,7 @@ sdist: test
 	python3 setup.py sdist
 
 test:
-	python3 -m pytest --cov=amethyst/ --cov-branch --cov-report=html:_coverage tests
+	python3 -m pytest --cov=amethyst_ttkvlib --cov-branch --cov-report=html:_coverage tests
 
 zip: test
 	python3 setup.py sdist --format=zip

@@ -5,7 +5,7 @@
 from __future__ import division, absolute_import, print_function, unicode_literals
 import unittest
 
-import amethyst.ttkvlib
+import amethyst_ttkvlib
 
 class MyTest(unittest.TestCase):
 

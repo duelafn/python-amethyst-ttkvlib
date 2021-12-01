@@ -18,9 +18,9 @@ import kivy.core.window
 import kivy.resources
 kivy.resources.resource_add_path(os.path.dirname(__file__))
 ##
-import amethyst.ttkvlib.widgets
-from amethyst.games.util import random, nonce
-from amethyst.ttkvlib.util import rotation_for_animation
+import amethyst_ttkvlib.widgets    # noqa: F401, for CardFan widget
+from amethyst_games.util import random, nonce
+from amethyst_ttkvlib.util import rotation_for_animation
 from amethyst.core import Object, Attr
 
 # A kv specification of the layout of our app. Some comments in there for
@@ -288,5 +288,6 @@ class CardFanApp(App):
             win.fullscreen = 'auto' if win.fullscreen is False else False
             win.update_viewport()
             return True
+
 
 CardFanApp().run()

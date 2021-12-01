@@ -35,7 +35,7 @@ setuptools.setup(
     packages     = setuptools.find_packages(),
     requires     = [
         'amethyst.core (>=0.8.6)',
-        'amethyst.games',
+        'amethyst_games',
         'kivy (>=1.10)',
     ],
     python_requires = '>=3.6',
